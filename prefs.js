@@ -240,7 +240,7 @@ export default class SmoothShellCornersPreferences extends ExtensionPreferences 
         // ── Page 3: Applications ─────────────────────────────────────────────
         const appsPage = new Adw.PreferencesPage({
             title:     _('Applications'),
-            icon_name: 'applications-all-symbolic',
+            icon_name: 'view-app-grid-symbolic',
         });
         win.add(appsPage);
 
