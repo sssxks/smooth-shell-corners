@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
-  <schema id="org.gnome.shell.extensions.rounded-windows"
-          path="/org/gnome/shell/extensions/rounded-windows/">
+  <schema id="org.gnome.shell.extensions.smooth-shell-corners"
+          path="/org/gnome/shell/extensions/smooth-shell-corners/">
 
     <!-- ── Core corner settings ────────────────────────────────────────── -->
     <key name="corner-radius" type="i">
@@ -40,6 +40,11 @@
     </key>
 
     <!-- ── Application filtering ───────────────────────────────────────── -->
+    <key name="remove-native-radius" type="b">
+      <default>false</default>
+      <summary>Remove native GTK4 window corners</summary>
+      <description>Manage a GTK4 user CSS override for host and existing Flatpak app configurations. Restart apps after changing this setting. Also applies to windows excluded from this extension.</description>
+    </key>
     <key name="skip-libadwaita-app" type="b">
       <default>true</default>
       <summary>Skip libadwaita apps (already have native rounded corners)</summary>

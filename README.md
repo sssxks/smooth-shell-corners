@@ -15,10 +15,12 @@
 ---
 
 This is a fork of [Nathanaelrc/rounded-windows](https://github.com/Nathanaelrc/rounded-windows)
-with interior pixel filling for clipped application borders. The extension UUID
-and settings schema are retained so installing this fork updates the existing
-extension and preserves its preferences. Upstream links below refer to the
-original project; the pixel-fill changes are in this checkout.
+with interior pixel filling for clipped application borders and optional native
+GTK4 corner removal. Its UUID is `smooth-shell-corners@xks`, with a separate
+`org.gnome.shell.extensions.smooth-shell-corners` settings schema. It installs
+alongside Rounded Windows. Enable only one of them at a time to avoid applying
+two effects to the same windows. Upstream links refer to the original project;
+this fork's changes are in this checkout.
 
 ## Table of contents
 
@@ -94,12 +96,10 @@ sudo pacman -S glib2
 sudo zypper install glib2-tools
 ```
 
-### 2. Clone the repository
+### 2. Open this checkout
 
-```bash
-git clone https://github.com/Nathanaelrc/rounded-windows.git
-cd rounded-windows
-```
+Run the following commands from this Smooth Shell Corners checkout. Cloning the
+upstream URL in the credits gives you the original extension without these changes.
 
 ### 3. Run the installer
 
@@ -111,7 +111,7 @@ chmod +x install.sh
 The script will:
 - Detect your GNOME Shell version and confirm it is supported
 - Compile the GSettings schema
-- Copy all extension files to `~/.local/share/gnome-shell/extensions/rounded-windows@marcosgt.github.io/`
+- Copy all extension files to `~/.local/share/gnome-shell/extensions/smooth-shell-corners@xks/`
 
 ### 4. Restart GNOME Shell
 
@@ -125,11 +125,17 @@ The extension is installed but not loaded yet. You need to restart the shell:
 
 ### 5. Enable the extension
 
+First disable the original extension if you have it installed:
+
+```bash
+gnome-extensions disable rounded-windows@marcosgt.github.io
+```
+
 After restarting, enable it with one of these methods:
 
 **Option A — terminal:**
 ```bash
-gnome-extensions enable rounded-windows@marcosgt.github.io
+gnome-extensions enable smooth-shell-corners@xks
 ```
 
 **Option B — GUI:**
@@ -138,7 +144,7 @@ Open the **Extensions** app (or **GNOME Tweaks → Extensions**) and toggle _Smo
 ### 6. Open settings (optional)
 
 ```bash
-gnome-extensions prefs rounded-windows@marcosgt.github.io
+gnome-extensions prefs smooth-shell-corners@xks
 ```
 
 Or click the ⚙️ icon next to the extension in the Extensions app.
@@ -146,6 +152,9 @@ Or click the ⚙️ icon next to the extension in the Extensions app.
 ---
 
 ## Uninstall
+
+Turn off **Remove native GTK4 corners** and restart affected apps first.
+The installer also removes our CSS block before deleting the extension files:
 
 ```bash
 ./install.sh --uninstall
@@ -203,10 +212,55 @@ Default shadow values:
 
 | Setting | Description | Default |
 |:--------|:------------|:--------|
+| Remove native GTK4 corners | Let the extension shape GTK4 windows; restart apps after changes | off |
 | Skip libadwaita apps | Don't round apps that already have built-in rounded corners | on |
 | Skip libhandy apps | Same, for legacy Handy apps | off |
 | Whitelist mode | Treat the exception list as a whitelist instead of a blacklist | off |
 | Exception list | One application identifier per line (`WM_CLASS`, Wayland app ID, or desktop ID) | — |
+
+#### Native GTK4 corner removal
+
+Enable **Remove native GTK4 corners** to provide rectangular window content to
+the shader, avoiding samples from libadwaita's transparent native corners. This
+overrides **Skip libadwaita apps** while active, preserving your skip preference
+for when you turn it off. Your radius, smoothing and padding still apply.
+
+The extension manages a marked `window.csd { border-radius: 0; }` block in:
+
+- `$XDG_CONFIG_HOME/gtk-4.0/gtk.css` (normally `~/.config/gtk-4.0/gtk.css`)
+- `~/.var/app/<app-id>/config/gtk-4.0/gtk.css` for existing Flatpak app directories
+
+GTK reads these files when apps start. **Restart affected apps after enabling,
+disabling, or disabling the extension.** This includes the preferences window.
+The override affects GTK4 client-decorated windows generally, including windows
+excluded by the extension's application filters. It does not change GTK3,
+libhandy, Qt, or Electron styling, and does not target in-app dialogs or popovers.
+Apps using their own clipping may still need separate handling. No Flatpak
+permissions are changed; apps with custom configuration paths may not pick up
+the override. Toggle the setting off/on after adding new Flatpak apps.
+
+Existing CSS and edits outside our marked block are preserved. Disabling removes
+the block from each configuration; an otherwise empty `gtk.css` can remain.
+If a file cannot be updated, GNOME shows an error. Files successfully changed
+during a failed enable are cleaned up. If Shell crashes or the extension files
+were removed without disabling it, restore the CSS from this checkout with:
+
+```bash
+gjs -m restore-native-radius.js
+```
+
+Then restart apps. This cleanup does not change the switch preference; turn it
+off as well if you do not want the override reapplied next time the extension loads.
+
+#### Reusing settings from the original extension
+
+The new extension starts with separate preferences. To copy your existing tuning
+once, while Smooth Shell Corners is disabled:
+
+```bash
+dconf dump /org/gnome/shell/extensions/rounded-windows/ > /tmp/ssc-old-settings.ini
+dconf load /org/gnome/shell/extensions/smooth-shell-corners/ < /tmp/ssc-old-settings.ini
+```
 
 **Finding a window identifier:**
 Use the X11/XWayland `WM_CLASS` when available. For Wayland-native apps, use the app ID or desktop file ID shown by GNOME Shell / your launcher entry.
@@ -217,10 +271,10 @@ Use the X11/XWayland `WM_CLASS` when available. For Wayland-native apps, use the
 
 ### No rounded corners appear
 
-1. Make sure the extension is **enabled** (`gnome-extensions list --enabled | grep rounded`).
+1. Make sure the extension is **enabled** (`gnome-extensions list --enabled | grep smooth-shell-corners`).
 2. Check the journal for errors:
    ```bash
-   journalctl -b /usr/bin/gnome-shell | grep -E "rounded-windows|JS ERROR"
+   journalctl -b /usr/bin/gnome-shell | grep -E "SmoothShellCorners|JS ERROR"
    ```
 3. The app may be libadwaita — disable **Skip libadwaita apps** in settings.
 
@@ -311,7 +365,9 @@ where `e = smoothing × 10 + 2` (2 = circle, 12 = squircle).
 ## Development checks
 
 ```bash
-node --test tests/effect.test.mjs
+node --test tests/*.test.mjs
+gjs -m tests/native-radius.js
+gjs -m tests/native-radius-render.js
 uv run tests/render.py
 glib-compile-schemas --strict --dry-run schemas
 ```
@@ -320,6 +376,10 @@ The rendering test compiles the actual shader snippets in a headless EGL context
 and checks a synthetic border, content preservation, opacity, and corner clipping.
 It uses an isolated uv environment with Python 3.13 and ModernGL. These checks do
 not replace testing in GNOME Shell with real apps, scaling, and tiling animations.
+The native-radius file tests use temporary directories, including simulated
+Flatpak configs; they do not modify your GTK settings. The native rendering test
+briefly opens a libadwaita window in the current graphical session and verifies
+its render nodes before applying CSS, after applying it, and after removing it.
 
 ## Credits
 

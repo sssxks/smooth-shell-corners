@@ -37,12 +37,13 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import { RoundedCornersEffect, ClipShadowEffect } from './effect.js';
+import { setNativeRadiusRemoved } from './native-radius.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
-const ROUNDED_CORNERS_EFFECT = 'rwc-rounded-corners';
-const CLIP_SHADOW_EFFECT      = 'rwc-clip-shadow';
+const ROUNDED_CORNERS_EFFECT = 'ssc-rounded-corners';
+const CLIP_SHADOW_EFFECT      = 'ssc-clip-shadow';
 const SHADOW_PADDING          = 80;   // extra pixels around the shadow actor
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -59,6 +60,7 @@ const SHADOW_PADDING          = 80;   // extra pixels around the shadow actor
 // }
 // ─────────────────────────────────────────────────────────────────────────────
 let _settings       = null;
+let _nativeRadiusRemoved = false;
 let _connections    = [];   // global connections
 const _actorMap     = new WeakMap();
 let _mutterSettings = null;
@@ -115,7 +117,7 @@ function shadowConfig(focused) {
 // ─────────────────────────────────────────────────────────────────────────────
 function logDbg(msg) {
     if (_settings && getB('debug-mode'))
-        console.log(`[RoundedWindows] ${msg}`);
+        console.log(`[SmoothShellCorners] ${msg}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -246,7 +248,7 @@ function shouldSkip(win) {
 
     // Optionally skip libadwaita / libhandy apps (unless explicitly listed)
     const appType = getAppType(win);
-    if (getB('skip-libadwaita-app') && appType === 'LibAdwaita' && !isListed)
+    if (!_nativeRadiusRemoved && getB('skip-libadwaita-app') && appType === 'LibAdwaita' && !isListed)
         return true;
     if (getB('skip-libhandy-app')   && appType === 'LibHandy'   && !isListed)
         return true;
@@ -421,13 +423,13 @@ function boxShadowCss(sc, scale) {
 function createShadow(actor) {
     // Outer bin: provides extra padding so the shadow can extend outside
     const shadow = new St.Bin({
-        name: 'RWC Shadow',
+        name: 'SSC Shadow',
         style: 'background: transparent;',
     });
 
     // Inner bin: the actual CSS shadow is applied here
     const inner = new St.Bin({ x_expand: true, y_expand: true });
-    inner.add_style_class_name('rwc-shadow');
+    inner.add_style_class_name('ssc-shadow');
     shadow.set_child(inner);
 
     // Bind x, y, width, height to the window actor (with padding offsets)
@@ -962,13 +964,32 @@ function disableEffect() {
 // Extension class
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default class RoundedWindowCornersExtension extends Extension {
+export default class SmoothShellCornersExtension extends Extension {
 
     #startupConnection = null;
+    #nativeRadiusConnection = null;
+
+    #syncNativeRadius(enabled) {
+        try {
+            setNativeRadiusRemoved(enabled);
+            _nativeRadiusRemoved = enabled;
+        } catch (error) {
+            console.error(`[SmoothShellCorners] ${error.message}`);
+            Main.notifyError('Smooth Shell Corners',
+                `Could not ${enabled ? 'remove' : 'restore'} native GTK4 corners. ${error.message}`);
+            // If enabling only succeeded for some files, roll those back.
+            if (enabled) this.#syncNativeRadius(false);
+        }
+    }
 
     enable() {
         _settings = this.getSettings();
         logDbg('Enabling…');
+        this.#syncNativeRadius(_settings.get_boolean('remove-native-radius'));
+        this.#nativeRadiusConnection = _settings.connect('changed::remove-native-radius', () => {
+            this.#syncNativeRadius(_settings.get_boolean('remove-native-radius'));
+            // enableEffect's general settings handler refreshes window effects.
+        });
 
         if (Main.layoutManager._startingUp) {
             // GNOME Shell is still starting up – wait until it is ready
@@ -993,6 +1014,12 @@ export default class RoundedWindowCornersExtension extends Extension {
         }
 
         disableEffect();
+        if (this.#nativeRadiusConnection !== null) {
+            _settings.disconnect(this.#nativeRadiusConnection);
+            this.#nativeRadiusConnection = null;
+        }
+        this.#syncNativeRadius(false);
+        _nativeRadiusRemoved = false;
         _settings = null;
         _mutterSettings = null;
         _fractionalScaling = null;

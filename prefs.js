@@ -92,7 +92,7 @@ function makeShadowGroup(title, prefix, settings) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Main preferences class
 // ─────────────────────────────────────────────────────────────────────────────
-export default class RoundedWindowsPreferences extends ExtensionPreferences {
+export default class SmoothShellCornersPreferences extends ExtensionPreferences {
 
     fillPreferencesWindow(win) {
         const settings = this.getSettings();
@@ -251,8 +251,25 @@ export default class RoundedWindowsPreferences extends ExtensionPreferences {
         });
         appsPage.add(skipGroup);
 
+        const nativeRow = new Adw.SwitchRow({
+            title: _('Remove native GTK4 corners'),
+            subtitle: _('Let Smooth Shell Corners shape libadwaita and other GTK4 windows. Restart apps after enabling or disabling.'),
+        });
+        bindBool(settings, 'remove-native-radius', nativeRow);
+        skipGroup.add(nativeRow);
+        skipGroup.add(new Adw.ActionRow({
+            title: _('Applies to host and existing Flatpak app configurations'),
+            subtitle: _('Also affects excluded apps. Disabling the extension restores the CSS; restart apps to restore their native corners.'),
+        }));
+
         const adwRow = new Adw.SwitchRow({ title: _('Skip libadwaita apps') });
         bindBool(settings, 'skip-libadwaita-app', adwRow);
+        const updateNativeSkip = () => {
+            adwRow.sensitive = !settings.get_boolean('remove-native-radius');
+            adwRow.subtitle = adwRow.sensitive ? '' : _('Ignored while native corner removal is enabled');
+        };
+        settings.connect('changed::remove-native-radius', updateNativeSkip);
+        updateNativeSkip();
         skipGroup.add(adwRow);
 
         const handyRow = new Adw.SwitchRow({ title: _('Skip libhandy apps') });

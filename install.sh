@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-UUID="rounded-windows@marcosgt.github.io"
+UUID="smooth-shell-corners@xks"
 INSTALL_DIR="${HOME}/.local/share/gnome-shell/extensions/${UUID}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -27,6 +27,7 @@ error()   { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
 
 # ── Uninstall path ────────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--uninstall" ]]; then
+    gjs -m "${SCRIPT_DIR}/restore-native-radius.js"
     if [[ -d "${INSTALL_DIR}" ]]; then
         rm -rf "${INSTALL_DIR}"
         info "Extension removed from ${INSTALL_DIR}"
@@ -76,6 +77,8 @@ EXTENSION_FILES=(
     metadata.json
     extension.js
     effect.js
+    native-radius.js
+    restore-native-radius.js
     prefs.js
     stylesheet.css
 )

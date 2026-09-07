@@ -1,9 +1,9 @@
 {
-    "uuid": "rounded-windows@marcosgt.github.io",
+    "uuid": "smooth-shell-corners@xks",
     "name": "Smooth Shell Corners",
     "description": "Smooth rounded corners and custom shadows for GNOME windows. Fill clipped application borders with nearby interior pixels to preserve window size when tiling. Supports GNOME 45–50.",
     "shell-version": ["45", "46", "47", "48", "49", "50"],
-    "version-name": "2.2.0",
+    "version-name": "0.1.0",
     "url": "https://github.com/Nathanaelrc/rounded-windows",
-    "settings-schema": "org.gnome.shell.extensions.rounded-windows"
+    "settings-schema": "org.gnome.shell.extensions.smooth-shell-corners"
 }

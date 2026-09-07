@@ -178,7 +178,7 @@ const SHADOW_CODE = /* glsl */`
 // priv->pipeline does not exist yet during build_pipeline in GNOME 50.
 // ─────────────────────────────────────────────────────────────────────────────
 export const RoundedCornersEffect = GObject.registerClass(
-    { GTypeName: 'RWCRoundedCornersEffect' },
+    { GTypeName: 'SSCRoundedCornersEffect' },
     class RoundedCornersEffect extends Shell.GLSLEffect {
 
         _u = null;
@@ -303,7 +303,7 @@ export const RoundedCornersEffect = GObject.registerClass(
 // content is — following the squircle shape instead of a plain rectangle.
 // ─────────────────────────────────────────────────────────────────────────────
 export const ClipShadowEffect = GObject.registerClass(
-    { GTypeName: 'RWCClipShadowEffect' },
+    { GTypeName: 'SSCClipShadowEffect' },
     class ClipShadowEffect extends Shell.GLSLEffect {
 
         _u = null;
