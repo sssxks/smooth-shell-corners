@@ -244,37 +244,46 @@ export default class SmoothShellCornersPreferences extends ExtensionPreferences 
         });
         win.add(appsPage);
 
-        // Skip libadwaita / libhandy
-        const skipGroup = new Adw.PreferencesGroup({
-            title:       _('Skip native apps'),
-            description: _('libadwaita / libhandy applications already draw their own rounded corners.'),
+        // GTK4 integration
+        const gtkGroup = new Adw.PreferencesGroup({
+            title:       _('GTK4 integration'),
         });
-        appsPage.add(skipGroup);
+        appsPage.add(gtkGroup);
 
         const nativeRow = new Adw.SwitchRow({
             title: _('Remove native GTK4 corners'),
-            subtitle: _('Let Smooth Shell Corners shape libadwaita and other GTK4 windows. Restart apps after enabling or disabling.'),
+            subtitle: _('let Smooth Shell Corners shape GTK4 windows. Restart affected apps after changing this.'),
         });
         bindBool(settings, 'remove-native-radius', nativeRow);
-        skipGroup.add(nativeRow);
-        skipGroup.add(new Adw.ActionRow({
-            title: _('Applies to host and existing Flatpak app configurations'),
-            subtitle: _('Also affects excluded apps. Disabling the extension restores the CSS; restart apps to restore their native corners.'),
-        }));
+        gtkGroup.add(nativeRow);
 
-        const adwRow = new Adw.SwitchRow({ title: _('Skip libadwaita apps') });
+        // Keep toolkit-specific exclusions distinct from GTK4 CSS preparation.
+        const toolkitGroup = new Adw.PreferencesGroup({
+            title:       _('Automatic exclusions'),
+            description: _('Leave applications that already draw rounded corners unchanged.'),
+        });
+        appsPage.add(toolkitGroup);
+
+        const adwRow = new Adw.SwitchRow({
+            title: _('Leave libadwaita windows unchanged'),
+        });
         bindBool(settings, 'skip-libadwaita-app', adwRow);
         const updateNativeSkip = () => {
             adwRow.sensitive = !settings.get_boolean('remove-native-radius');
-            adwRow.subtitle = adwRow.sensitive ? '' : _('Ignored while native corner removal is enabled');
+            adwRow.subtitle = adwRow.sensitive
+                ? _('Use their toolkit-provided corners instead of applying this extension')
+                : _('Not applicable while native GTK4 corners are being replaced');
         };
         settings.connect('changed::remove-native-radius', updateNativeSkip);
         updateNativeSkip();
-        skipGroup.add(adwRow);
+        toolkitGroup.add(adwRow);
 
-        const handyRow = new Adw.SwitchRow({ title: _('Skip libhandy apps') });
+        const handyRow = new Adw.SwitchRow({
+            title: _('Leave libhandy windows unchanged'),
+            subtitle: _('Use their toolkit-provided corners instead of applying this extension'),
+        });
         bindBool(settings, 'skip-libhandy-app', handyRow);
-        skipGroup.add(handyRow);
+        toolkitGroup.add(handyRow);
 
         // Blacklist / whitelist
         const listGroup = new Adw.PreferencesGroup({
@@ -333,14 +342,6 @@ export default class SmoothShellCornersPreferences extends ExtensionPreferences 
         });
 
         const listBox = new Gtk.Box({ orientation: Gtk.Orientation.VERTICAL, spacing: 4 });
-        listBox.append(new Gtk.Label({
-            label:  _('Use one identifier per line. For X11/XWayland this is usually the WM_CLASS; ' +
-                      'on Wayland-native apps it can be the application ID or desktop file ID.'),
-            use_markup: true,
-            wrap:   true,
-            xalign: 0,
-            margin_top: 4,
-        }));
         listBox.append(scrolled);
 
         const listExpander = new Adw.ExpanderRow({ title: _('Exception list') });
@@ -369,7 +370,7 @@ export default class SmoothShellCornersPreferences extends ExtensionPreferences 
         aboutGroup.add(nameRow);
 
         const srcRow = new Adw.ActionRow({
-            title:    _('Upstream source code'),
+            title:    _('Source code'),
             subtitle: this.metadata.url ?? '',
             activatable: true,
         });

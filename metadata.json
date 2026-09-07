@@ -1,9 +1,9 @@
 {
     "uuid": "smooth-shell-corners@xks",
     "name": "Smooth Shell Corners",
-    "description": "Smooth rounded corners and custom shadows for GNOME windows. Fill clipped application borders with nearby interior pixels to preserve window size when tiling. Supports GNOME 45–50.",
+    "description": "Squircles For your Applications! Polished, Consistent Look, Fixes native border or toolkit corners",
     "shell-version": ["45", "46", "47", "48", "49", "50"],
     "version-name": "0.1.1",
-    "url": "https://github.com/Nathanaelrc/rounded-windows",
+    "url": "https://github.com/sssxks/smooth-shell-corners",
     "settings-schema": "org.gnome.shell.extensions.smooth-shell-corners"
 }

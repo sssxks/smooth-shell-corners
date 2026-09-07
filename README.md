@@ -16,7 +16,9 @@
 
 This is a fork of [Nathanaelrc/rounded-windows](https://github.com/Nathanaelrc/rounded-windows)
 with interior pixel filling for clipped application borders and optional native
-GTK4 corner removal. Its UUID is `smooth-shell-corners@xks`, with a separate
+GTK4 corner removal. It also keeps window text crisp under fractional scaling by
+rendering effects at the window's actual painted density and aligning them to
+physical pixels. Its UUID is `smooth-shell-corners@xks`, with a separate
 `org.gnome.shell.extensions.smooth-shell-corners` settings schema. It installs
 alongside Rounded Windows. Enable only one of them at a time to avoid applying
 two effects to the same windows. Upstream links refer to the original project;
@@ -50,9 +52,10 @@ this fork's changes are in this checkout.
 - **Squircle / superellipse** — adjustable smoothing (0 = circle, 1 = squircle)
 - **Custom shadow** — rounded CSS `box-shadow` replaces GNOME's default rectangular shadow, clipped with the same squircle curve
 - **Border** — optional inner or outer coloured border with configurable width
-- **Smart skip** — automatically skips libadwaita / libhandy apps to avoid double-rounding
+- **Toolkit-aware handling** — replace native GTK4 corners or leave libadwaita / libhandy windows unchanged
 - **Blacklist / Whitelist** — exclude or exclusively include apps by `WM_CLASS`, Wayland app ID, or desktop file ID
 - **GNOME 50 / Wayland aware** — matches native Wayland windows without depending on `WM_CLASS`
+- **Crisp text at fractional scaling** — pixel-aligned rendering avoids the blur caused by resampling window content
 - **Live settings** — all changes apply instantly without restarting the shell
 
 ---
@@ -153,7 +156,7 @@ Or click the ⚙️ icon next to the extension in the Extensions app.
 
 ## Uninstall
 
-Turn off **Remove native GTK4 corners** and restart affected apps first.
+Turn off **Replace native GTK4 corners** and restart affected apps first.
 The installer also removes our CSS block before deleting the extension files:
 
 ```bash
@@ -212,18 +215,19 @@ Default shadow values:
 
 | Setting | Description | Default |
 |:--------|:------------|:--------|
-| Remove native GTK4 corners | Let the extension shape GTK4 windows; restart apps after changes | off |
-| Skip libadwaita apps | Don't round apps that already have built-in rounded corners | on |
-| Skip libhandy apps | Same, for legacy Handy apps | off |
+| Replace native GTK4 corners | Let the extension shape GTK4 windows; restart apps after changes | off |
+| Leave libadwaita windows unchanged | Use their toolkit-provided corners instead of this extension | on |
+| Leave libhandy windows unchanged | Same, for legacy Handy apps | off |
 | Whitelist mode | Treat the exception list as a whitelist instead of a blacklist | off |
 | Exception list | One application identifier per line (`WM_CLASS`, Wayland app ID, or desktop ID) | — |
 
 #### Native GTK4 corner removal
 
-Enable **Remove native GTK4 corners** to provide rectangular window content to
+Enable **Replace native GTK4 corners** to provide rectangular window content to
 the shader, avoiding samples from libadwaita's transparent native corners. This
-overrides **Skip libadwaita apps** while active, preserving your skip preference
-for when you turn it off. Your radius, smoothing and padding still apply.
+makes **Leave libadwaita windows unchanged** inapplicable while active, preserving
+your exclusion preference for when you turn it off. Your radius, smoothing and
+padding still apply.
 
 The extension manages a marked `window.csd { border-radius: 0; }` block in:
 
@@ -276,7 +280,7 @@ Use the X11/XWayland `WM_CLASS` when available. For Wayland-native apps, use the
    ```bash
    journalctl -b /usr/bin/gnome-shell | grep -E "SmoothShellCorners|JS ERROR"
    ```
-3. The app may be libadwaita — disable **Skip libadwaita apps** in settings.
+3. The app may be libadwaita — disable **Leave libadwaita windows unchanged** in settings.
 
 ### Corners still square on one specific app
 

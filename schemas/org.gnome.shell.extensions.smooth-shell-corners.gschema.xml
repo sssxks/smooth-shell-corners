@@ -6,19 +6,19 @@
     <!-- ── Core corner settings ────────────────────────────────────────── -->
     <key name="corner-radius" type="i">
       <range min="1" max="50"/>
-      <default>12</default>
+      <default>8</default>
       <summary>Corner radius in pixels</summary>
     </key>
 
     <key name="smoothing" type="d">
       <range min="0.0" max="1.0"/>
-      <default>0.6</default>
+      <default>1.0</default>
       <summary>Squircle smoothing (0 = circle, 1 = squircle)</summary>
     </key>
 
     <!-- ── Padding ─────────────────────────────────────────────────────── -->
     <key name="fill-padding" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Fill clipped edges with interior pixels</summary>
       <description>Use padding as a sampling inset and extend the nearest interior pixels to the original window bounds.</description>
     </key>
@@ -41,17 +41,17 @@
 
     <!-- ── Application filtering ───────────────────────────────────────── -->
     <key name="remove-native-radius" type="b">
-      <default>false</default>
-      <summary>Remove native GTK4 window corners</summary>
+      <default>true</default>
+      <summary>Replace native GTK4 window corners</summary>
       <description>Manage a GTK4 user CSS override for host and existing Flatpak app configurations. Restart apps after changing this setting. Also applies to windows excluded from this extension.</description>
     </key>
     <key name="skip-libadwaita-app" type="b">
-      <default>true</default>
-      <summary>Skip libadwaita apps (already have native rounded corners)</summary>
+      <default>false</default>
+      <summary>Leave libadwaita windows unchanged</summary>
     </key>
     <key name="skip-libhandy-app" type="b">
       <default>false</default>
-      <summary>Skip libhandy apps</summary>
+      <summary>Leave libhandy windows unchanged</summary>
     </key>
 
     <!-- ── Blacklist / whitelist ───────────────────────────────────────── -->
@@ -89,7 +89,7 @@
 
     <!-- ── Behaviour ───────────────────────────────────────────────────── -->
     <key name="keep-rounded-maximized" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Keep rounded corners when a window is maximized</summary>
     </key>
     <key name="keep-rounded-fullscreen" type="b">
@@ -99,7 +99,7 @@
 
     <!-- ── Custom shadow ───────────────────────────────────────────────── -->
     <key name="custom-shadow" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Replace the default rectangular shadow with a rounded one</summary>
     </key>
     <key name="keep-shadow-maximized" type="b">
