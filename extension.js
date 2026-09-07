@@ -697,7 +697,8 @@ function refreshRoundedCorners(actor) {
     if (!fx.enabled) fx.enabled = true;
 
     const cfg = buildConfig();
-    fx.updateUniforms(scaleFactor(win), cfg, computeBounds(actor, cfg.fillPadding));
+    fx.updateUniforms(scaleFactor(win), cfg, computeBounds(actor, cfg.fillPadding),
+        global.display.get_monitor_scale(win.get_monitor()));
 
     // Update shadow
     if (data) {
@@ -884,6 +885,14 @@ function enableEffect() {
     // Window closed
     addConnection(global.windowManager, 'destroy',
         (_, actor) => removeEffectFrom(actor));
+
+    // Resource scale is integer-rounded by Clutter, so its notify signal cannot
+    // distinguish 125% from 150%. Track actual monitor changes instead.
+    addConnection(Main.layoutManager, 'monitors-changed', refreshAll);
+    addConnection(global.display, 'window-entered-monitor', (_, _monitor, win) => {
+        const actor = win.get_compositor_private();
+        if (actor) refreshRoundedCorners(actor);
+    });
 
     // Minimise: always hide shadow + disable effect to prevent the white
     // background of the shadow actor from showing during the animation.

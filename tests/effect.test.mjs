@@ -6,15 +6,27 @@ import {test} from 'node:test';
 // Run the real uniform setup without requiring a running GNOME Shell.
 const source = readFileSync(new URL('../effect.js', import.meta.url), 'utf8')
     .replace(/^import .*;$/gm, '').replaceAll('export const ', 'const ');
-class GLSLEffect {
-    values = {};
-    actor = {get_width: () => 100, get_height: () => 80};
-    get_uniform_location(name) { return name; }
-    set_uniform_float(name, _size, value) { this.values[name] = value; }
+class EffectBase {
+    actor = {
+        get_width: () => 100, get_height: () => 80,
+        get_context: () => ({get_backend: () => ({get_cogl_context: () => null})}),
+    };
+    get values() { return this._pipeline.values; }
     queue_repaint() {}
 }
+const Cogl = {
+    Pipeline: {new: () => ({
+        values: {},
+        get_uniform_location: name => name,
+        set_uniform_float(name, _size, _count, values) { this.values[name] = values; },
+        set_blend() {}, set_layer_filters() {}, add_layer_snippet() {}, add_snippet() {},
+    })},
+    Snippet: {new: () => ({set_replace() {}})},
+    SnippetHook: {}, PipelineFilter: {},
+};
 const Effect = vm.runInNewContext(`${source}\nRoundedCornersEffect`, {
-    GObject: {registerClass: (_meta, cls) => cls}, Shell: {GLSLEffect},
+    GObject: {registerClass: (_meta, cls) => cls}, Shell: {GLSLEffect: EffectBase},
+    Clutter: {Effect: EffectBase}, Cogl,
 });
 const cfg = {
     padding: {left: 2, top: 2, right: 2, bottom: 2},
@@ -33,7 +45,7 @@ test('fill restores frame bounds and samples clean pixel centres at each scale',
         assert.deepEqual(plain(fx.values.bounds), [0, 0, 100, 80]);
         const inset = Math.ceil(2 * scale) + 0.5;
         near(fx.values.sampleBounds,
-            [inset / 100, inset / 80, (100 - inset) / 100, (80 - inset) / 80]);
+            [inset / 101, inset / 81, (100 - inset) / 101, (80 - inset) / 81]);
     }
 });
 
@@ -48,7 +60,17 @@ test('asymmetric padding and frame offsets respect the buffer', () => {
     const fx = new Effect();
     fx.updateUniforms(1, {...cfg, padding: {left: 0, top: 1, right: 3, bottom: 4}},
         {x1: 10, y1: 8, x2: 90, y2: 72});
-    near(fx.values.sampleBounds, [0.105, 0.11875, 0.865, 0.84375]);
+    near(fx.values.sampleBounds, [10.5 / 101, 9.5 / 81, 86.5 / 101, 67.5 / 81]);
+});
+
+test('fractional sampling accounts for framebuffer size and physical pixel phase', () => {
+    const fx = new Effect();
+    fx.updateUniforms(1, cfg, frame, 1.5);
+    near(fx.values.pixelStep, [1.5 / 151, 1.5 / 121]);
+    near(fx.values.sampleBounds, [3.5 / 151, 3.5 / 121, 146.5 / 151, 116.5 / 121]);
+    fx._updateTextureMapping(151, 121, -1 / 3, -1 / 3);
+    near(fx.values.textureOrigin, [-1 / 3, -1 / 3]);
+    near(fx.values.sampleBounds, [4.5 / 151, 4.5 / 121, 146.5 / 151, 116.5 / 121]);
 });
 
 test('oversized padding cannot invert the sample rectangle', () => {

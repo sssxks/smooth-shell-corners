@@ -338,7 +338,7 @@ Then [open a bug report](#reporting-bugs) with the full log.
 
 ```
 Window Actor (MetaWindowActor)
-  └─ RoundedCornersEffect  ← Shell.GLSLEffect (offscreen FBO)
+  └─ RoundedCornersEffect  ← Clutter.Effect (pixel-aligned offscreen FBO)
         Fragment shader:
           • converts tex coord → pixel position
           • evaluates squircle formula at each corner
@@ -353,6 +353,14 @@ Shadow Actor (St.Bin, inserted below the window in global.windowGroup)
           • prevents shadow from bleeding through rounded corners
   └─ Inner St.Bin  → CSS  border-radius + box-shadow
 ```
+
+The window effect owns its framebuffer to preserve text sharpness. The stock
+offscreen effect rounds fractional resource scales up: at 150%, window content
+is sampled at 200% and then reduced again. This extension renders at the actual
+painted density and aligns the framebuffer origin to physical pixels, including
+windows positioned between physical pixels. Overview clones use their projected
+paint size. Cached content is redrawn when the app updates or the sampling grid
+changes. No Mutter patch is needed.
 
 The shader uses a **squircle (superellipse)** formula:
 
@@ -369,6 +377,7 @@ node --test tests/*.test.mjs
 gjs -m tests/native-radius.js
 gjs -m tests/native-radius-render.js
 uv run tests/render.py
+timeout 120s uv run tests/compositor.py
 glib-compile-schemas --strict --dry-run schemas
 ```
 
@@ -380,6 +389,14 @@ The native-radius file tests use temporary directories, including simulated
 Flatpak configs; they do not modify your GTK settings. The native rendering test
 briefly opens a libadwaita window in the current graphical session and verifies
 its render nodes before applying CSS, after applying it, and after removing it.
+
+The compositor test targets Bazzite with GNOME Shell 50.4. It starts a separate
+headless Shell, private session bus and GTK text fixture with temporary settings;
+it does not change the running desktop. It compares interior screenshot pixels
+with the effect disabled at 100%, 125%, 150% and 200%, including fractional pixel
+positions, content updates, opacity and an overview-style clone. Results are
+written to `dist/sharpness-results.json`. This renderer has not yet been verified
+on older Shell releases or with mixed-monitor setups and other window effects.
 
 ## Credits
 

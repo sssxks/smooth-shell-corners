@@ -56,7 +56,7 @@ vao = ctx.vertex_array(program, [])
 for key, value in dict(bounds=(0, 0, w, h), clipRadius=0, exponent=2,
                        borderWidth=0, borderColor=(1, 1, 1, 1),
                        borderedAreaBounds=(0, 0, w, h), borderedAreaClipRadius=0,
-                       pixelStep=(1/w, 1/h), fillPadding=1,
+                       pixelStep=(1/w, 1/h), textureOrigin=(0, 0), fillPadding=1,
                        sampleBounds=(2.5/w, 2.5/h, (w-2.5)/w, (h-2.5)/h),
                        actorOpacity=1).items():
     program[key].value = value
