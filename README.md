@@ -158,10 +158,23 @@ Then restart GNOME Shell (step 4 above).
 | Radius | Corner radius in logical pixels | `12` |
 | Smoothing | `0` = circle · `1` = squircle (superellipse) | `0.6` |
 | Clip padding | Extra gap between the window edge and the clip boundary | `1` |
+| Fill clipped edges | Extend pixels from inside the padding to the original window bounds | off |
 | Border width | Positive = inner border · Negative = outer · `0` = none | `0` |
 | Border colour | RGBA colour picker | white |
 | Keep rounded when maximised | Apply corners even when a window fills the screen | off |
 | Keep rounded when full-screen | Apply corners in full-screen mode | off |
+
+To hide a 2px application border without opening seams between tiled windows,
+enable **Fill clipped edges**, set the four padding values to **2**, and set
+**Border width** to **0**. Padding follows the extension's monitor scaling.
+The shader repeats the nearest interior row/column without resizing the content;
+the corner mask and custom shadow use the original window footprint.
+
+Content touching the sampled edge (such as scrollbars or images) will stretch
+across the narrow strip. Transparent app backgrounds and client-drawn rounded
+corners can still show through: this samples the actual app pixels, not an
+inferred background color. Rounded corners and gaps configured in your tiling
+extension remain. Turning the option off restores ordinary clipping.
 
 ### Shadow tab
 
@@ -289,6 +302,19 @@ where `e = smoothing × 10 + 2` (2 = circle, 12 = squircle).
 
 ---
 
+## Development checks
+
+```bash
+node --test tests/effect.test.mjs
+uv run tests/render.py
+glib-compile-schemas --strict --dry-run schemas
+```
+
+The rendering test compiles the actual shader snippets in a headless EGL context
+and checks a synthetic border, content preservation, opacity, and corner clipping.
+It uses an isolated uv environment with Python 3.13 and ModernGL. These checks do
+not replace testing in GNOME Shell with real apps, scaling, and tiling animations.
+
 ## Credits
 
 This extension was built by studying and adapting code from several open-source projects:
@@ -308,5 +334,3 @@ The squircle shader, shadow clipping with squircle masking, GNOME 50 / Mutter 18
 
 This project is licensed under the [GNU General Public License v3.0](LICENSE).  
 You are free to use, modify, and distribute it under the same license.
-
-

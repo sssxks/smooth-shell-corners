@@ -30,6 +30,20 @@ import Shell from 'gi://Shell';
 // GLSL – Rounded corners shader
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Remap the texture lookup before Cogl applies actor opacity. Sampling in the
+// final fragment hook would bypass that modulation during window animations.
+const FILL_DECLARATIONS = /* glsl */`
+uniform float fillPadding;
+uniform vec4 sampleBounds;
+`;
+
+const FILL_CODE = /* glsl */`
+    vec2 uv = cogl_tex_coord.st;
+    if (fillPadding > 0.5)
+        uv = clamp(uv, sampleBounds.xy, sampleBounds.zw);
+    cogl_texel = texture2D(cogl_sampler, uv);
+`;
+
 const ROUNDED_DECLARATIONS = /* glsl */`
 uniform vec4  bounds;
 uniform float clipRadius;
@@ -171,6 +185,12 @@ export const RoundedCornersEffect = GObject.registerClass(
 
         vfunc_build_pipeline() {
             this.add_glsl_snippet(
+                Cogl.SnippetHook.TEXTURE_LOOKUP,
+                FILL_DECLARATIONS,
+                FILL_CODE,
+                true,
+            );
+            this.add_glsl_snippet(
                 Cogl.SnippetHook.FRAGMENT,
                 ROUNDED_DECLARATIONS,
                 ROUNDED_CODE,
@@ -183,6 +203,8 @@ export const RoundedCornersEffect = GObject.registerClass(
         _ensureUniforms() {
             if (this._u) return;
             this._u = {
+                fillPadding:            this.get_uniform_location('fillPadding'),
+                sampleBounds:           this.get_uniform_location('sampleBounds'),
                 bounds:                 this.get_uniform_location('bounds'),
                 clipRadius:             this.get_uniform_location('clipRadius'),
                 borderWidth:            this.get_uniform_location('borderWidth'),
@@ -209,12 +231,16 @@ export const RoundedCornersEffect = GObject.registerClass(
             const outerR = cfg.cornerRadius * scaleFactor;
             const { padding, smoothing } = cfg;
 
-            const b = [
+            const sample = [
                 windowBounds.x1 + padding.left   * scaleFactor,
                 windowBounds.y1 + padding.top    * scaleFactor,
                 windowBounds.x2 - padding.right  * scaleFactor,
                 windowBounds.y2 - padding.bottom * scaleFactor,
             ];
+
+            const b = cfg.fillPadding
+                ? [windowBounds.x1, windowBounds.y1, windowBounds.x2, windowBounds.y2]
+                : sample;
 
             const bb = [b[0] + bw, b[1] + bw, b[2] - bw, b[3] - bw];
 
@@ -228,6 +254,22 @@ export const RoundedCornersEffect = GObject.registerClass(
                 actorH > 0 ? 1 / actorH : 1,
             ];
 
+            // Clamp to clean texel centres so linear filtering cannot mix the
+            // removed border back in. Collapse excessive padding to the middle
+            // of the frame instead of passing inverted bounds to GLSL clamp.
+            const sampleBounds = [];
+            for (let axis = 0; axis < 2; axis++) {
+                const extent = axis === 0 ? actorW : actorH;
+                const start = axis === 0 ? windowBounds.x1 : windowBounds.y1;
+                const end = axis === 0 ? windowBounds.x2 : windowBounds.y2;
+                const middle = Math.min(
+                    Math.max(Math.floor((start + end) / 2) + 0.5, 0.5),
+                    Math.max(0.5, extent - 0.5),
+                );
+                sampleBounds[axis] = Math.min(Math.ceil(sample[axis]) + 0.5, middle) * ps[axis];
+                sampleBounds[axis + 2] = Math.max(Math.floor(sample[axis + 2]) - 0.5, middle) * ps[axis];
+            }
+
             let exponent = smoothing * 10 + 2;
             let radius   = outerR * 0.5 * exponent;
             const maxR   = Math.min(b[2] - b[0], b[3] - b[1]) / 2;
@@ -239,6 +281,8 @@ export const RoundedCornersEffect = GObject.registerClass(
                 borderInnerR *= radius / outerR;
 
             const u = this._u;
+            this.set_uniform_float(u.fillPadding,            1, [cfg.fillPadding ? 1 : 0]);
+            this.set_uniform_float(u.sampleBounds,           4, sampleBounds);
             this.set_uniform_float(u.bounds,                 4, b);
             this.set_uniform_float(u.clipRadius,             1, [radius]);
             this.set_uniform_float(u.borderWidth,            1, [bw]);

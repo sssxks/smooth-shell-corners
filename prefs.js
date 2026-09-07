@@ -133,6 +133,13 @@ export default class RoundedWindowsPreferences extends ExtensionPreferences {
         });
         cornersPage.add(padGroup);
 
+        const fillRow = new Adw.SwitchRow({
+            title: _('Fill clipped edges'),
+            subtitle: _('Extend interior pixels over the padding to preserve the window size.'),
+        });
+        bindBool(settings, 'fill-padding', fillRow);
+        padGroup.add(fillRow);
+
         for (const [side, key] of [
             [_('Top'),    'padding-top'],
             [_('Bottom'), 'padding-bottom'],

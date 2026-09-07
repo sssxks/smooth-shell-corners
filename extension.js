@@ -79,6 +79,7 @@ function buildConfig() {
     return {
         cornerRadius: getI('corner-radius'),
         smoothing:    getD('smoothing'),
+        fillPadding:  getB('fill-padding'),
         padding: {
             top:    getI('padding-top'),
             bottom: getI('padding-bottom'),
@@ -374,7 +375,7 @@ function contentOffset(win) {
  * Its allocation tracks the actual window buffer, so contentOffset() can be
  * applied uniformly for Wayland and X11/XWayland windows.
  */
-function computeBounds(actor) {
+function computeBounds(actor, fillPadding = false) {
     const win = actor.metaWindow;
     const sc  = scaleFactor(win);
     const target = targetActor(actor) ?? actor;
@@ -391,10 +392,13 @@ function computeBounds(actor) {
 
     // Apply a 1px anti-aliasing inset if the window has no buffer padding
     // in that direction to avoid drawing semitransparent texture edge pixels.
-    if (x1 === 0) x1 += sc;
-    if (y1 === 0) y1 += sc;
-    if (x2 === targetW) x2 -= sc;
-    if (y2 === targetH) y2 -= sc;
+    // Filled edges replace these texture-edge pixels and must reach the frame.
+    if (!fillPadding) {
+        if (x1 === 0) x1 += sc;
+        if (y1 === 0) y1 += sc;
+        if (x2 === targetW) x2 -= sc;
+        if (y2 === targetH) y2 -= sc;
+    }
 
     return { x1, y1, x2, y2 };
 }
@@ -494,10 +498,10 @@ function refreshShadowStyle(actor, shadowActor) {
         : `background: transparent;
            border-radius: ${radius}px;
            ${boxShadowCss(scfg, cssScale)};
-           margin: ${cfg.padding.top    * cssScale}px
-                   ${cfg.padding.right  * cssScale}px
-                   ${cfg.padding.bottom * cssScale}px
-                   ${cfg.padding.left   * cssScale}px;`;
+           margin: ${cfg.fillPadding ? 0 : cfg.padding.top    * cssScale}px
+                   ${cfg.fillPadding ? 0 : cfg.padding.right  * cssScale}px
+                   ${cfg.fillPadding ? 0 : cfg.padding.bottom * cssScale}px
+                   ${cfg.fillPadding ? 0 : cfg.padding.left   * cssScale}px;`;
 }
 
 /** Update the ClipShadowEffect bounds for a shadow actor.
@@ -552,10 +556,10 @@ function refreshShadowClip(actor, shadowActor) {
     const rawY2 = pad + actor.height + dh;
 
     // Account for padding inset (same as RoundedCornersEffect)
-    const bx1 = rawX1 + cfg.padding.left   * sc;
-    const by1 = rawY1 + cfg.padding.top    * sc;
-    const bx2 = rawX2 - cfg.padding.right  * sc;
-    const by2 = rawY2 - cfg.padding.bottom * sc;
+    const bx1 = rawX1 + (cfg.fillPadding ? 0 : cfg.padding.left   * sc);
+    const by1 = rawY1 + (cfg.fillPadding ? 0 : cfg.padding.top    * sc);
+    const bx2 = rawX2 - (cfg.fillPadding ? 0 : cfg.padding.right  * sc);
+    const by2 = rawY2 - (cfg.fillPadding ? 0 : cfg.padding.bottom * sc);
 
     const maxR = Math.min(bx2 - bx1, by2 - by1) / 2;
     if (maxR > 0 && radius > maxR) {
@@ -691,7 +695,7 @@ function refreshRoundedCorners(actor) {
     if (!fx.enabled) fx.enabled = true;
 
     const cfg = buildConfig();
-    fx.updateUniforms(scaleFactor(win), cfg, computeBounds(actor));
+    fx.updateUniforms(scaleFactor(win), cfg, computeBounds(actor, cfg.fillPadding));
 
     // Update shadow
     if (data) {

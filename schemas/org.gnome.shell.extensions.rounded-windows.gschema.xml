@@ -17,6 +17,11 @@
     </key>
 
     <!-- ── Padding ─────────────────────────────────────────────────────── -->
+    <key name="fill-padding" type="b">
+      <default>false</default>
+      <summary>Fill clipped edges with interior pixels</summary>
+      <description>Use padding as a sampling inset and extend the nearest interior pixels to the original window bounds.</description>
+    </key>
     <key name="padding-top" type="i">
       <range min="0" max="100"/>
       <default>1</default>
