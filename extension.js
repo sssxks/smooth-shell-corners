@@ -1,5 +1,5 @@
 /**
- * extension.js – Rounded Window Corners
+ * extension.js – Smooth Shell Corners
  *
  * Applies GLSL-based rounded corners (and an optional custom shadow) to every
  * window that is not already drawn with libadwaita / libhandy.

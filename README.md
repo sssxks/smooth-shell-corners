@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/JS-ES2022-F7DF1E?style=flat-square&logo=javascript&logoColor=black" alt="JavaScript">
 </p>
 
-<h1 align="center">Rounded Window Corners</h1>
+<h1 align="center">Smooth Shell Corners</h1>
 
 <p align="center">
   A GNOME Shell extension that adds <strong>rounded corners</strong> to top-level windows —<br>
@@ -13,6 +13,12 @@
 </p>
 
 ---
+
+This is a fork of [Nathanaelrc/rounded-windows](https://github.com/Nathanaelrc/rounded-windows)
+with interior pixel filling for clipped application borders. The extension UUID
+and settings schema are retained so installing this fork updates the existing
+extension and preserves its preferences. Upstream links below refer to the
+original project; the pixel-fill changes are in this checkout.
 
 ## Table of contents
 
@@ -127,7 +133,7 @@ gnome-extensions enable rounded-windows@marcosgt.github.io
 ```
 
 **Option B — GUI:**
-Open the **Extensions** app (or **GNOME Tweaks → Extensions**) and toggle _Rounded Window Corners_ on.
+Open the **Extensions** app (or **GNOME Tweaks → Extensions**) and toggle _Smooth Shell Corners_ on.
 
 ### 6. Open settings (optional)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh – Build and install "Rounded Window Corners" into the user session
+# install.sh – Build and install "Smooth Shell Corners" into the user session
 #
 # Usage:
 #   ./install.sh              # compile schema + install extension

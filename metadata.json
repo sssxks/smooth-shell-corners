@@ -1,7 +1,7 @@
 {
     "uuid": "rounded-windows@marcosgt.github.io",
-    "name": "Rounded Window Corners",
-    "description": "Adds rounded corners to top-level windows in GNOME Shell, including Wayland-native, X11/XWayland, Qt, Electron, and other non-libadwaita apps. GPU-accelerated GLSL shader with squircle support, custom shadows, and per-app settings. Supports GNOME 45–50.",
+    "name": "Smooth Shell Corners",
+    "description": "Smooth rounded corners and custom shadows for GNOME windows. Fill clipped application borders with nearby interior pixels to preserve window size when tiling. Supports GNOME 45–50.",
     "shell-version": ["45", "46", "47", "48", "49", "50"],
     "version-name": "2.2.0",
     "url": "https://github.com/Nathanaelrc/rounded-windows",
