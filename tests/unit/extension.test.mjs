@@ -68,3 +68,97 @@ test('failed native removal reports an error and rolls back partial writes', () 
     assert.equal(state.skip(), true);
     state.instance.disable();
 });
+
+function setupWindowLifecycle() {
+    function emitter() {
+        const callbacks = new Map();
+        let nextId = 0;
+        return {
+            connect(signal, callback) {
+                callbacks.set(++nextId, {signal, callback});
+                return nextId;
+            },
+            disconnect(id) { callbacks.delete(id); },
+            emit(signal, ...args) {
+                for (const entry of [...callbacks.values()])
+                    if (entry.signal === signal) entry.callback(this, ...args);
+            },
+            callbacks,
+        };
+    }
+    const actor = Object.assign(emitter(), {
+        metaWindow: emitter(),
+        effects: new Map(),
+        get_effect(name) { return this.effects.get(name); },
+        add_effect_with_name(name, effect) { this.effects.set(name, effect); },
+        remove_effect_by_name(name) { this.effects.delete(name); },
+        get_first_child() { return this; },
+        bind_property(prop, target) {
+            const copy = () => { target[prop] = this[prop]; };
+            copy();
+            const id = this.connect(`notify::${prop}`, copy);
+            return {unbind: () => this.disconnect(id)};
+        },
+        opacity: 255,
+    });
+    const shadow = {
+        destroyed: false,
+        get_constraints: () => [],
+        get_parent: () => null,
+        clear_effects() {},
+        destroy() { this.destroyed = true; },
+    };
+    const windowManager = emitter();
+    const actors = [actor];
+    const state = vm.runInNewContext(`${source}
+        _settings = settings;
+        refreshRoundedCorners = () => {};
+        createShadow = () => shadow;
+        enableEffect();
+        ({disable: disableEffect, tracked: () => _actorMap.size});
+    `, {
+        Extension: class {},
+        settings: {...emitter(), get_boolean: key => key === 'custom-shadow'},
+        shadow,
+        global: {get_window_actors: () => actors, display: emitter(), windowManager},
+        Main: {layoutManager: emitter()},
+        GObject: {BindingFlags: {SYNC_CREATE: 1}},
+        RoundedCornersEffect: class {},
+        targetActor: actor => actor,
+        getWindowTexture: () => actor,
+        getWindowEffect: (actor, name) => actor.get_effect(name),
+        shouldSkipWindow: () => false,
+        clearWindowFilterCache() {},
+        connectSignal(connections, object, signal, callback) {
+            connections.push({object, id: object.connect(signal, callback)});
+        },
+        disconnectSignals(connections) {
+            for (const {object, id} of connections) object.disconnect(id);
+            connections.length = 0;
+        },
+    });
+    return {...state, actor, shadow, actors, windowManager};
+}
+
+for (const finish of ['destroy', 'disable']) {
+    test(`closing window keeps corners until ${finish} and releases its resources`, () => {
+        const state = setupWindowLifecycle();
+        const {actor, shadow, windowManager} = state;
+        assert.equal(actor.effects.size, 1);
+        windowManager.emit('destroy', actor);
+        state.actors.length = 0;
+        assert.equal(actor.effects.size, 1, 'close animation retains corner effect');
+        assert.equal(shadow.destroyed, false);
+        actor.opacity = 96;
+        actor.emit('notify::opacity');
+        assert.equal(shadow.opacity, 96, 'shadow follows the close fade');
+        if (finish === 'destroy') actor.emit('destroy');
+        else state.disable();
+        assert.equal(actor.effects.size, 0);
+        assert.equal(shadow.destroyed, true);
+        assert.equal(state.tracked(), 0);
+        assert.equal(actor.callbacks.size, 0);
+        assert.equal(actor.metaWindow.callbacks.size, 0);
+        state.disable();
+    });
+}

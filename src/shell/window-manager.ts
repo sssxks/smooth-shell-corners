@@ -9,12 +9,12 @@
  * enable()
  *   └─ wait for shell startup → enableEffect()
  *        ├─ connect global signals   (window-created, minimize, unminimize,
- *        │                            destroy, restacked, settings changed)
+ *        │                            restacked, settings changed)
  *        └─ applyEffectTo() every existing window actor
  *
  * applyEffectTo(actor)
  *   ├─ connect per-window signals  (size, texture size, fullscreen, focus,
- *   │                               workspace-changed)
+ *   │                               workspace-changed, actor destroy)
  *   └─ onAddEffect(actor)
  *        ├─ add RoundedCornersEffect to the actor / surface
  *        ├─ create custom shadow St.Bin (below the actor in windowGroup)
@@ -60,7 +60,7 @@ const ROUNDED_CORNERS_EFFECT = 'ssc-rounded-corners';
 // Module-level state
 //   _settings  – Gio.Settings instance (populated by enable())
 //   _connections – list of { object, id } for global signal connections
-//   _actorMap    – WeakMap<Meta.WindowActor, ActorData>
+//   _actorMap    – Map<Meta.WindowActor, ActorData> (includes closing actors)
 //
 // ActorData = {
 //   shadow         : St.Bin | null,
@@ -72,7 +72,7 @@ const ROUNDED_CORNERS_EFFECT = 'ssc-rounded-corners';
 let _settings       = null;
 let _nativeRadiusRemoved = false;
 const _connections: SignalConnection[] = [];   // global connections
-const _actorMap     = new WeakMap();
+const _actorMap     = new Map();
 let _mutterSettings = null;
 let _mutterSettingsConn = 0;
 let _fractionalScaling = null;
@@ -208,7 +208,7 @@ function onAddEffect(actor) {
 
         // Mirror visibility / transform from window to shadow
         for (const prop of ['pivot-point', 'translation-x', 'translation-y',
-                             'scale-x', 'scale-y', 'visible']) {
+                             'scale-x', 'scale-y', 'visible', 'opacity']) {
             bindings.push(actor.bind_property(prop, shadow, prop,
                 GObject.BindingFlags.SYNC_CREATE));
         }
@@ -363,6 +363,10 @@ function attachWindowSignals(actor) {
     const win     = actor.metaWindow;
     const texture = getWindowTexture(actor);
 
+    // The window-manager destroy signal starts the close animation. Keep the
+    // effect until the actor itself is destroyed, after its final painted frame.
+    addWinConn(actor, 'destroy', () => removeEffectFrom(actor));
+
     // Window resized → update shader uniforms
     addWinConn(actor,   'notify::size',  () => { if (actor.metaWindow) refreshRoundedCorners(actor); });
     if (texture)
@@ -458,10 +462,6 @@ function enableEffect() {
             applyEffectToWindow(win);
         });
 
-    // Window closed
-    addConnection(global.windowManager, 'destroy',
-        (_, actor) => removeEffectFrom(actor));
-
     // Resource scale is integer-rounded by Clutter, so its notify signal cannot
     // distinguish 125% from 150%. Track actual monitor changes instead.
     addConnection(Main.layoutManager, 'monitors-changed', refreshAll);
@@ -529,7 +529,8 @@ function enableEffect() {
 }
 
 function disableEffect() {
-    for (const actor of global.get_window_actors())
+    // Closing actors can already be absent from get_window_actors().
+    for (const actor of _actorMap.keys())
         removeEffectFrom(actor);
     disconnectAll();
     
