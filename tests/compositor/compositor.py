@@ -48,6 +48,7 @@ import Cogl from 'gi://Cogl';
 import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import {{checkWindowFilter}} from '{repo.as_uri()}/tests/compositor/window-filter.js';
 import Extension from '{repo.as_uri()}/dist/extension.js';
 import {{RoundedCornersEffect}} from '{repo.as_uri()}/dist/effects/rounded-corners.js';
 import {{shadowFixture}} from '{repo.as_uri()}/tests/compositor/shadow-fixture.js';
@@ -62,7 +63,7 @@ export default class Probe {{
             'settings-schema':'org.gnome.shell.extensions.smooth-shell-corners'}});
         const settings = extension.getSettings();
         settings.set_boolean('skip-libadwaita-app', false);
-        global.ssc = {{RoundedCornersEffect, Pass, Clutter, makeShadow: shadowFixture, extension, settings}};
+        global.ssc = {{RoundedCornersEffect, Pass, Clutter, makeShadow: shadowFixture, extension, settings, checkWindowFilter}};
         this.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {{
             Main.overview.hide();
             this.owner = Gio.bus_own_name(Gio.BusType.SESSION, 'org.example.SSCProbe',
@@ -114,6 +115,8 @@ export default class Probe {{
                     return
                 time.sleep(0.05)
             raise AssertionError(expression)
+
+        assert evaluate("global.ssc.checkWindowFilter(global.ssc.actor.metaWindow, global.ssc.settings)")
 
         # Exercise the actual lifecycle before the independent renderer probes.
         effect = "global.ssc.actor.get_effect('ssc-rounded-corners') !== null"

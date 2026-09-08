@@ -107,20 +107,16 @@ export function shouldSkip(
     if (whitelistMode ? !isListed : isListed)
         return true;
 
-    const appType = getAppType(win);
-    if (!nativeRadiusRemoved &&
-        config.skipLibadwaitaApp &&
-        appType === 'LibAdwaita' &&
-        !isListed)
-        return true;
-    if (config.skipLibhandyApp && appType === 'LibHandy' && !isListed)
-        return true;
-
     const isMaximized = win.maximizedHorizontally || win.maximizedVertically;
     if (isMaximized && !config.keepRoundedMaximized)
         return true;
     if (win.fullscreen && !config.keepRoundedFullscreen)
         return true;
 
-    return false;
+    const skipAdwaita = !nativeRadiusRemoved && config.skipLibadwaitaApp;
+    if (isListed || (!skipAdwaita && !config.skipLibhandyApp))
+        return false;
+    const appType = getAppType(win);
+    return (skipAdwaita && appType === 'LibAdwaita') ||
+        (config.skipLibhandyApp && appType === 'LibHandy');
 }
