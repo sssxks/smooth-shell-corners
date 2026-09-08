@@ -48,13 +48,14 @@ import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {{RoundedCornersEffect}} from '{repo.as_uri()}/dist/effects/rounded-corners.js';
+import {{shadowFixture}} from '{repo.as_uri()}/tests/compositor/shadow-fixture.js';
 const Pass = GObject.registerClass(class SSCProbePass extends Shell.GLSLEffect {{
     vfunc_build_pipeline() {{ this.add_glsl_snippet(Cogl.SnippetHook.FRAGMENT, '', '', false); }}
 }});
 export default class Probe {{
     enable() {{
         global.context.unsafe_mode = true;
-        global.ssc = {{RoundedCornersEffect, Pass, Clutter}};
+        global.ssc = {{RoundedCornersEffect, Pass, Clutter, makeShadow: shadowFixture}};
         this.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {{
             Main.overview.hide();
             this.owner = Gio.bus_own_name(Gio.BusType.SESSION, 'org.example.SSCProbe',
@@ -164,6 +165,35 @@ export default class Probe {{
         returned = capture("desktop-return")
         evaluate("global.ssc.actor.clear_effects(); true;")
         compare("return-from-clone", capture("return-baseline"), returned, 1.5, 101, 101, 600, 400)
+
+        # A dark shadow must get darker (never brighter) toward a black window.
+        # Inspect all four straight edges, including the first exterior pixel.
+        for scale in [1, 1.25, 1.5, 2]:
+            control("scale", scale)
+            for fill in [True, False]:
+                for blur, spread, dx, dy in [(18, 0, 0, 0), (32, 4, 3, -3), (8, -2, -2, 2), (0, 8, 0, 0)]:
+                    evaluate(f"global.ssc.makeShadow({str(fill).lower()}, {blur}, {spread}, {dx}, {dy}, {scale})")
+                    shot = capture("shadow")
+                    inset = 0 if fill else 3
+                    left, top, right, bottom = [round(v * scale) for v in
+                        (201 + inset, 201 + inset, 501 - inset, 441 - inset)]
+                    cx, cy = round(351 * scale), round(321 * scale)
+                    profiles = [shot[cy, left-12:left+2, 0],
+                                shot[cy, right-2:right+12, 0][::-1],
+                                shot[top-12:top+2, cx, 0],
+                                shot[bottom-2:bottom+12, cx, 0][::-1]]
+                    assert all(profile[:10].min() < 240 for profile in profiles), "Missing shadow"
+                    assert all(profile[-1] == 0 for profile in profiles), "Missing opaque window"
+                    # Scan into each rounded corner as well as the straight edges.
+                    for row in [*range(top, top + round(48 * scale)),
+                                *range(bottom - round(48 * scale), bottom)]:
+                        profiles.extend([shot[row, left-12:cx, 0],
+                                         shot[row, cx:right+12, 0][::-1]])
+                    for edge, profile in zip(["left", "right", "top", "bottom"] + ["corner"] * (len(profiles)-4), profiles):
+                        peak = int(np.diff(profile).argmax())
+                        assert np.diff(profile)[peak] <= 2, (scale, fill, blur, spread, dx, dy,
+                            edge, profile[max(0, peak-2):peak+4].tolist())
+        print("Shadow edge continuity passed at 100%, 125%, 150% and 200%.", flush=True)
 
         (repo / "dist").mkdir(exist_ok=True)
         artifacts = repo / "tests/artifacts"

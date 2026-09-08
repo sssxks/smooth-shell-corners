@@ -353,8 +353,8 @@ Shadow Actor (St.Bin, inserted below the window in global.windowGroup)
   └─ ClipShadowEffect  ← Shell.GLSLEffect
         Fragment shader:
           • same squircle formula as above
-          • makes the shadow transparent where the window sits
-          • prevents shadow from bleeding through rounded corners
+          • maps the padded offscreen texture into actor coordinates
+          • clears the interior, retaining shadow beneath antialiased edges
   └─ Inner St.Bin  → CSS  border-radius + box-shadow
 ```
 
@@ -392,7 +392,8 @@ entry points; window lifecycle, filtering, geometry, shadows, effects, settings,
 and preference pages are maintained in separate modules.
 
 The rendering test compiles the actual shader snippets in a headless EGL context
-and checks a synthetic border, content preservation, opacity, and corner clipping.
+and checks a synthetic border, content preservation, opacity, corner clipping,
+and window/shadow composition without an antialiasing seam.
 It uses an isolated uv environment with Python 3.13 and ModernGL. These checks do
 not replace testing in GNOME Shell with real apps, scaling, and tiling animations.
 The native-radius file tests use temporary directories, including simulated
@@ -407,6 +408,15 @@ with the effect disabled at 100%, 125%, 150% and 200%, including fractional pixe
 positions, content updates, opacity and an overview-style clone. Results are
 written to `tests/artifacts/sharpness-results.json`. This renderer has not yet been verified
 on older Shell releases or with mixed-monitor setups and other window effects.
+
+The same compositor test checks shadow continuity along all four edges and corners
+at those scales, with filling on/off and varied blur, spread and offsets. A black
+window and shadow over white must darken continuously toward the window; a bright
+pixel between them fails the test. This reproduced the inherited gap with the
+original effects from Rounded Windows commit `9d9eb77013b24e45ae75fc92a85a9b6d82e052f6`.
+The fix accounts for Mutter's padded offscreen texture, matches the window's
+buffer-edge inset, and keeps shadow under the antialiased edge instead of cutting
+both layers away there.
 
 ## Credits
 

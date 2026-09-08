@@ -27,7 +27,28 @@ export const ClipShadowEffect = GObject.registerClass(
                 radius:  this.get_uniform_location('shadowRadius'),
                 exp:     this.get_uniform_location('shadowExp'),
                 step:    this.get_uniform_location('shadowStep'),
+                origin:  this.get_uniform_location('shadowOrigin'),
             };
+        }
+
+        vfunc_paint_target(node, context) {
+            this._ensureUniforms();
+            const texture = this.get_texture();
+            const scale = this.actor.get_resource_scale();
+            const volume = this.actor.get_paint_volume();
+            const origin = volume?.get_origin() ?? {x: 0, y: 0};
+            const width = volume?.get_width() ?? this.actor.width;
+            const height = volume?.get_height() ?? this.actor.height;
+            // Clutter's _clutter_actor_box_enlarge_for_effects adds three
+            // logical pixels to the paint volume, with an asymmetric origin.
+            // Read the actual texture at paint time: actor size alone omits
+            // this padding (and any CSS shadow overflowing the allocation).
+            const x = Math.trunc(Math.ceil(origin.x + width + 0.75) - Math.round(width) - 3);
+            const y = Math.trunc(Math.ceil(origin.y + height + 0.75) - Math.round(height) - 3);
+            this.set_uniform_float(this._u.step, 2,
+                [scale / texture.get_width(), scale / texture.get_height()]);
+            this.set_uniform_float(this._u.origin, 2, [x, y]);
+            super.vfunc_paint_target(node, context);
         }
 
         /**
@@ -36,30 +57,17 @@ export const ClipShadowEffect = GObject.registerClass(
          *                             in shadow-actor pixel coordinates
          * @param {number}   radius  – squircle corner radius (same as RoundedCornersEffect)
          * @param {number}   exp     – squircle exponent (same as RoundedCornersEffect)
-         * @param {number}   sw      – shadow actor width  (0 = read from actor)
-         * @param {number}   sh      – shadow actor height (0 = read from actor)
-         *
-         * sw/sh may be passed explicitly to avoid a layout-timing race:
-         * BindConstraints are resolved on the next Clutter layout pass, so
-         * this.actor.get_width() can return 0 on the first call (e.g. for
-         * Qt/OpenGL X11 windows that defer applyEffectTo until notify::size).
+         * Texture mapping is set at paint time, after layout and offscreen
+         * allocation; actor dimensions may still be zero when this is called.
          */
-        setClip(bounds, radius, exp, sw = 0, sh = 0) {
+        setClip(bounds, radius, exp) {
             this._ensureUniforms();
             if (!this._u) return;
-
-            const w = sw > 0 ? sw : this.actor.get_width();
-            const h = sh > 0 ? sh : this.actor.get_height();
-            if (w <= 0 || h <= 0) return;
-
-            const step = [1 / w, 1 / h];
 
             this.set_uniform_float(this._u.bounds,  4, bounds);
             this.set_uniform_float(this._u.radius,  1, [radius]);
             this.set_uniform_float(this._u.exp,     1, [exp]);
-            this.set_uniform_float(this._u.step,    2, step);
             this.queue_repaint();
         }
     },
 );
-

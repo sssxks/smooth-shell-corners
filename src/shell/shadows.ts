@@ -4,7 +4,7 @@ import St from 'gi://St';
 
 import {ClipShadowEffect} from '../effects/index.js';
 import {readCornerConfig, readShadowConfig, type ShadowConfig} from '../settings/config.js';
-import {contentOffset} from './window-geometry.js';
+import {computeBounds, contentOffset} from './window-geometry.js';
 
 const CLIP_SHADOW_EFFECT = 'ssc-clip-shadow';
 const SHADOW_PADDING = 80;
@@ -94,7 +94,7 @@ export function refreshShadowClip(
         return;
 
     const padding = SHADOW_PADDING * scale;
-    const [, , dw, dh] = contentOffset(actor.metaWindow);
+    const [dx, dy, dw, dh] = contentOffset(actor.metaWindow);
     const width = actor.width + dw + 2 * padding;
     const height = actor.height + dh + 2 * padding;
     if (width <= 0 || height <= 0)
@@ -105,11 +105,14 @@ export function refreshShadowClip(
     let exponent = config.smoothing * 10 + 2;
     let radius = outerRadius * 0.5 * exponent;
 
-    const x1 = padding + (config.fillPadding ? 0 : config.padding.left * scale);
-    const y1 = padding + (config.fillPadding ? 0 : config.padding.top * scale);
-    const x2 = padding + actor.width + dw -
+    // Include the same buffer-edge inset as the window effect, then translate
+    // from window-buffer coordinates into the padded shadow actor.
+    const bounds = computeBounds(actor, scale, config.fillPadding);
+    const x1 = padding + bounds.x1 - dx + (config.fillPadding ? 0 : config.padding.left * scale);
+    const y1 = padding + bounds.y1 - dy + (config.fillPadding ? 0 : config.padding.top * scale);
+    const x2 = padding + bounds.x2 - dx -
         (config.fillPadding ? 0 : config.padding.right * scale);
-    const y2 = padding + actor.height + dh -
+    const y2 = padding + bounds.y2 - dy -
         (config.fillPadding ? 0 : config.padding.bottom * scale);
 
     const maximumRadius = Math.min(x2 - x1, y2 - y1) / 2;
@@ -118,7 +121,7 @@ export function refreshShadowClip(
         radius = maximumRadius;
     }
 
-    effect.setClip([x1, y1, x2, y2], radius, exponent, width, height);
+    effect.setClip([x1, y1, x2, y2], radius, exponent);
 }
 
 export function refreshShadowGeometry(actor: any, shadowActor: any, scale: number): void {

@@ -79,14 +79,15 @@ export const ROUNDED_CODE = /* glsl */`
 // ─────────────────────────────────────────────────────────────────────────────
 // GLSL – Clip shadow shader
 //
-// Uses the same squircle formula as RoundedCornersEffect so the shadow is
-// clipped with pixel-perfect precision along the rounded corners.
+// Uses the window's squircle formula with an inset hole, leaving shadow under
+// its antialiased edge while clearing the fully covered interior.
 //
 // Uniforms (all in shadow-actor pixel coordinates):
 //   shadowBounds  – [x1, y1, x2, y2] of the WINDOW content area
 //   shadowRadius  – squircle corner radius (matches RoundedCornersEffect)
 //   shadowExp     – squircle exponent (matches RoundedCornersEffect)
-//   shadowStep    – [1/actorW, 1/actorH] for the shadow actor
+//   shadowStep    – logical pixels per offscreen texture dimension
+//   shadowOrigin  – padded offscreen origin in shadow-actor coordinates
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const SHADOW_DECLARATIONS = /* glsl */`
@@ -94,6 +95,7 @@ uniform vec4  shadowBounds;
 uniform float shadowRadius;
 uniform float shadowExp;
 uniform vec2  shadowStep;
+uniform vec2  shadowOrigin;
 
 float shadowCircleBounds(vec2 p, vec2 center, float r) {
     vec2  d     = p - center;
@@ -130,10 +132,13 @@ float shadowGetOpacity(vec2 p, vec4 b, float r, float e) {
 `;
 
 export const SHADOW_CODE = /* glsl */`
-    vec2 p = cogl_tex_coord_in[0].xy / shadowStep;
-    // opacity = 1 inside the squircle, 0 outside, anti-aliased at edges
-    float opacity = shadowGetOpacity(p, shadowBounds, shadowRadius, shadowExp);
-    // Erase the shadow where the window content would be (inside the squircle)
+    vec2 p = cogl_tex_coord_in[0].xy / shadowStep + shadowOrigin;
+    // Keep shadow beneath the window's antialiased edge. Complementary masks
+    // composited separately leave a * (1-a) of the desktop showing through.
+    // Inset the hole by one logical pixel, preserving the corner centres;
+    // its transition is then hidden by fully opaque window content.
+    vec4 hole = shadowBounds + vec4(1.0, 1.0, -1.0, -1.0);
+    float opacity = shadowGetOpacity(p, hole, max(0.0, shadowRadius - 1.0), shadowExp);
     cogl_color_out *= (1.0 - opacity);
 `;
 
@@ -144,4 +149,3 @@ export const SHADOW_CODE = /* glsl */`
 // offscreen. At 150%, a native 1.5x window gets resampled to 2x and back to 1.5x.
 // Own the framebuffer here to keep the intermediate image at the monitor scale.
 // The shadow below can still use Shell.GLSLEffect: it contains no sharp content.
-

@@ -81,3 +81,50 @@ result = fbo.read(components=4)
 assert result[3] == 0, 'Rounded corner should stay transparent'
 assert result[((h//2)*w)*4+3] == 255, 'Straight edge should reach frame'
 print('Shader compiled; edge fill, unchanged interior, disabled mode, opacity and corners passed.')
+
+# Composite the real window/shadow masks over white with a solid black shadow.
+# Antialiased window pixels must not expose the desktop between the two layers.
+shadow_program = ctx.program(
+    vertex_shader="""#version 330
+    out vec2 uv;
+    void main() {
+        vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+        uv = p;
+        gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+    }""",
+    fragment_shader="""#version 330
+    in vec2 uv;
+    out vec4 cogl_color_out;
+    """ + snippet("ROUNDED_DECLARATIONS") + snippet("SHADOW_DECLARATIONS") + """
+    void main() {
+        vec4 cogl_tex_coord_in[1];
+        cogl_tex_coord_in[0] = vec4(uv, 0, 1);
+        cogl_color_out = vec4(1);
+    """ + snippet("SHADOW_CODE") + """
+        float windowAlpha = getOpacity(uv / shadowStep + shadowOrigin,
+                                       shadowBounds, shadowRadius, shadowExp);
+        float coverage = windowAlpha + cogl_color_out.a * (1.0 - windowAlpha);
+        // Red: combined coverage; green: window coverage; blue: shadow alone.
+        cogl_color_out = vec4(coverage, windowAlpha, cogl_color_out.a, 1);
+    }""",
+)
+shadow_vao = ctx.vertex_array(shadow_program, [])
+for scale in [1, 1.25, 1.5, 2]:
+    size = round(64 * scale)
+    shadow_fbo = ctx.simple_framebuffer((size, size), components=4)
+    shadow_fbo.use()
+    for exponent in [2, 8, 12]:
+        for key, value in dict(shadowBounds=(8, 8, 52, 52), shadowRadius=12,
+                               shadowExp=exponent, shadowStep=(1/64, 1/64),
+                               shadowOrigin=(-2, -2)).items():
+            shadow_program[key].value = value
+        shadow_vao.render(vertices=3)
+        result = shadow_fbo.read(components=4)
+        edges = [result[i:i+4] for i in range(0, len(result), 4)
+                 if 0 < result[i+1] < 255]
+        assert edges, (scale, exponent, 'No antialiased pixels exercised')
+        assert all(pixel[0] == 255 for pixel in edges), (scale, exponent, edges)
+        center = ((size//2)*size + size//2)*4
+        assert result[center+2] == 0, 'Shadow must still be cleared beneath the window interior'
+    shadow_fbo.release()
+print('Window/shadow composition has no antialiasing seam; transparent shadow interior passed.')
