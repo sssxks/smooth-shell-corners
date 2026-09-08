@@ -69,7 +69,7 @@ test('failed native removal reports an error and rolls back partial writes', () 
     state.instance.disable();
 });
 
-function setupWindowLifecycle() {
+function setupWindowLifecycle(ready = true) {
     function emitter() {
         const callbacks = new Map();
         let nextId = 0;
@@ -109,6 +109,7 @@ function setupWindowLifecycle() {
         destroy() { this.destroyed = true; },
     };
     const windowManager = emitter();
+    const timeline = emitter();
     const actors = [actor];
     const state = vm.runInNewContext(`${source}
         _settings = settings;
@@ -130,7 +131,7 @@ function setupWindowLifecycle() {
         RoundedCornersEffect: class { updateUniforms() {} },
         refreshShadowGeometry() {},
         targetActor: actor => actor,
-        getWindowTexture: () => actor,
+        getWindowTexture: () => ready ? actor : null,
         getWindowEffect: (actor, name) => actor.get_effect(name),
         shouldSkipWindow: () => false,
         clearWindowFilterCache() {},
@@ -142,7 +143,7 @@ function setupWindowLifecycle() {
             connections.length = 0;
         },
     });
-    return {...state, actor, shadow, actors, windowManager};
+    return {...state, actor, shadow, actors, windowManager, timeline, ready() { ready = true; actor.emit('notify::size'); }};
 }
 
 for (const finish of ['destroy', 'disable']) {
@@ -164,6 +165,50 @@ for (const finish of ['destroy', 'disable']) {
         assert.equal(state.tracked(), 0);
         assert.equal(actor.callbacks.size, 0);
         assert.equal(actor.metaWindow.callbacks.size, 0);
+        state.disable();
+    });
+}
+
+for (const finish of ['destroy', 'disable']) {
+    test(`window awaiting texture is disconnected on ${finish}`, () => {
+        const state = setupWindowLifecycle(false);
+        assert.equal(state.actor.effects.size, 0);
+        assert.equal(state.tracked(), 1);
+        if (finish === 'destroy') state.actor.emit('destroy');
+        else state.disable();
+        state.ready();
+        assert.equal(state.actor.effects.size, 0);
+        assert.equal(state.actor.callbacks.size, 0);
+        assert.equal(state.actor.metaWindow.callbacks.size, 0);
+        assert.equal(state.tracked(), 0);
+        state.disable();
+    });
+}
+
+test('late texture becomes rounded without reconnecting the window', () => {
+    const state = setupWindowLifecycle(false);
+    state.ready();
+    assert.equal(state.actor.effects.size, 1);
+    state.disable();
+});
+
+for (const finish of ['completed', 'disable']) {
+    test(`Magic Lamp completion is owned until ${finish}`, () => {
+        const state = setupWindowLifecycle();
+        state.actor.effects.set('unminimize-magic-lamp-effect', {timerId: state.timeline});
+        state.windowManager.emit('minimize', state.actor);
+        state.windowManager.emit('unminimize', state.actor);
+        assert.equal(state.shadow.visible, false);
+        assert.equal(state.timeline.callbacks.size, 1);
+        if (finish === 'completed') {
+            state.timeline.emit('completed');
+            assert.equal(state.shadow.visible, true);
+        } else {
+            state.disable();
+            state.timeline.emit('completed');
+            assert.equal(state.shadow.visible, false);
+        }
+        assert.equal(state.timeline.callbacks.size, 0);
         state.disable();
     });
 }

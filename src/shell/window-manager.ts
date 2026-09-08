@@ -186,7 +186,7 @@ function onAddEffect(actor) {
 
     const target = targetActor(actor);
     const data = _actorMap.get(actor);
-    if (!target || !data || getEffect(actor)) return;
+    if (!target || !data || !getWindowTexture(actor) || getEffect(actor)) return;
 
     target.add_effect_with_name(ROUNDED_CORNERS_EFFECT, new RoundedCornersEffect());
 
@@ -231,6 +231,7 @@ function onRemoveEffect(actor) {
     const data = _actorMap.get(actor);
     if (!data) return;
 
+    disconnectSignals(data.animationConnections);
     removeShadow(data);
 }
 
@@ -322,6 +323,7 @@ function attachWindowSignals(actor) {
     addWinConn(actor, 'destroy', () => removeEffectFrom(actor));
 
     // Window resized → update shader uniforms
+    addWinConn(actor, 'notify::first-child', () => refreshRoundedCorners(actor));
     addWinConn(actor,   'notify::size',  () => { if (actor.metaWindow) refreshRoundedCorners(actor); });
     if (texture)
         addWinConn(texture, 'size-changed', () => { if (actor.metaWindow) refreshRoundedCorners(actor); });
@@ -343,63 +345,21 @@ function applyEffectTo(actor) {
     if (!actor?.metaWindow)
         return;
 
-    if (_actorMap.has(actor) || getEffect(actor)) {
-        refreshRoundedCorners(actor);
+    if (!_actorMap.has(actor)) {
+        _actorMap.set(actor, {
+            shadow: null, bindings: [], connections: [], signalsAttached: false,
+            timeoutId: 0, animationConnections: [],
+        });
         attachWindowSignals(actor);
-        return;
     }
-
-    // Wayland / XWayland windows may not have a surface child yet.
-    if (!actor.get_first_child?.()) {
-        const connId = actor.connect('notify::first-child', () => {
-            actor.disconnect(connId);
-            applyEffectTo(actor);
-        });
-        return;
-    }
-
-    if (!getWindowTexture(actor)) {
-        // The compositor texture is not ready yet.  This happens with Qt /
-        // OpenGL-accelerated X11 apps (VirtualBox, Qt-GL, some Chromium builds)
-        // where the window is mapped before its first paint arrives.
-        // Wait for the actor's size to change (first paint / resize), then retry.
-        // We disconnect before retrying to avoid double-applying the effect.
-        const connId = actor.connect('notify::size', () => {
-            actor.disconnect(connId);
-            applyEffectTo(actor);
-        });
-        return;
-    }
-
-    // Add the effect FIRST, then connect signals. If signals were connected
-    // before the effect, adding the effect could trigger notify::size
-    // synchronously, causing re-entrant calls to refreshRoundedCorners
-    // before _actorMap has been populated.
-    _actorMap.set(actor, {
-        shadow: null, bindings: [], connections: [], signalsAttached: false, timeoutId: 0,
-    });
     refreshRoundedCorners(actor);
-    attachWindowSignals(actor);
 }
 
 function applyEffectToWindow(win) {
-    if (!win)
-        return;
-
-    const actor = win.get_compositor_private?.();
-    if (actor) {
-        applyEffectTo(actor);
-        return;
-    }
-
-    const connId = win.connect('notify::compositor-private', () => {
-        const nextActor = win.get_compositor_private?.();
-        if (!nextActor)
-            return;
-
-        win.disconnect(connId);
-        applyEffectTo(nextActor);
-    });
+    const actor = win.get_compositor_private();
+    if (actor) applyEffectTo(actor);
+    // WindowManager::map handles actors created after window-created. There is
+    // no Meta.Window compositor-private property to observe with notify.
 }
 
 function removeEffectFrom(actor) {
@@ -426,6 +386,8 @@ function enableEffect() {
             applyEffectToWindow(win);
         });
 
+    addConnection(global.windowManager, 'map', (_, actor) => applyEffectTo(actor));
+
     // Resource scale is integer-rounded by Clutter, so its notify signal cannot
     // distinguish 125% from 150%. Track actual monitor changes instead.
     addConnection(Main.layoutManager, 'monitors-changed', refreshAll);
@@ -439,6 +401,7 @@ function enableEffect() {
     addConnection(global.windowManager, 'minimize',
         (_, actor) => {
             const data = _actorMap.get(actor);
+            if (data) disconnectSignals(data.animationConnections);
             if (data?.shadow)
                 data.shadow.visible = false;
             const fx = getEffect(actor);
@@ -446,25 +409,22 @@ function enableEffect() {
         });
 
     // Unminimise: restore shadow + effect.  For the Magic-Lamp extension,
-    // wait until the animation is nearly finished before showing the shadow.
+    // wait until the animation finishes before showing the shadow.
     addConnection(global.windowManager, 'unminimize',
         (_, actor) => {
             const data = _actorMap.get(actor);
             const fx   = getEffect(actor);
 
+            if (data) disconnectSignals(data.animationConnections);
             const lamp = actor.get_effect('unminimize-magic-lamp-effect');
-            if (lamp && data?.shadow && fx) {
+            const timer = lamp?.timerId;
+            if (timer && data?.shadow && fx) {
                 data.shadow.visible = false;
-                const timer = lamp.timerId;
-                if (timer) {
-                    const tid = timer.connect('new-frame', src => {
-                        if (src.get_progress() > 0.98) {
-                            data.shadow.visible = true;
-                            fx.enabled = true;
-                            src.disconnect(tid);
-                        }
-                    });
-                }
+                connectSignal(data.animationConnections, timer, 'completed', () => {
+                    disconnectSignals(data.animationConnections);
+                    if (data.shadow) data.shadow.visible = true;
+                    fx.enabled = true;
+                });
                 return;
             }
 
