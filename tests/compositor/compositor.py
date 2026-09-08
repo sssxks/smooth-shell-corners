@@ -147,6 +147,9 @@ export default class Probe {{
         evaluate("global.ssc.settings.set_boolean('whitelist-mode', false); true;")
         eventually(effect)
         evaluate("global.ssc.actor.metaWindow.minimize(); true;")
+        # The effect must remain enabled throughout the minimize animation;
+        # disabling it here causes the visible rounded corners to flicker off.
+        eventually("global.ssc.actor.get_effect('ssc-rounded-corners')?.enabled === true")
         eventually("global.ssc.actor.metaWindow.minimized")
         evaluate("global.ssc.actor.metaWindow.unminimize(); true;")
         eventually(f"!global.ssc.actor.metaWindow.minimized && ({effect}) && global.ssc.actor.get_effect('ssc-rounded-corners').enabled")

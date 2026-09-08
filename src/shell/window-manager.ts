@@ -269,15 +269,14 @@ function enableEffect() {
         if (actor) refreshRoundedCorners(actor);
     })});
 
-    // Minimise: always hide shadow + disable effect to prevent the white
-    // background of the shadow actor from showing during the animation.
+    // Minimise: hide the shadow to prevent its white background from showing
+    // during the animation. Keep the corner effect active so the animated
+    // window never briefly falls back to square corners.
     _connections.push({object: global.windowManager, id: global.windowManager.connect('minimize', (_, actor) => {
             const data = _actorMap.get(actor);
             if (data) disconnectSignals(data.animationConnections);
             if (data?.shadow)
                 data.shadow.visible = false;
-            const fx = getEffect(actor);
-            if (fx) fx.enabled = false;
         })});
 
     // Unminimise: restore shadow + effect.  For the Magic-Lamp extension,
