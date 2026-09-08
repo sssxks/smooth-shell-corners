@@ -29,7 +29,7 @@ function setup(failEnable = false) {
         getAppType = () => 'LibAdwaita';
         shouldSkipWindow = () => _settings.get_boolean('skip-libadwaita-app') &&
             !_nativeRadiusRemoved;
-        ({instance: new SmoothShellCornersExtension(), skip: () => shouldSkip({windowType: 0}, {})});
+        ({instance: new SmoothShellCornersExtension(), skip: () => shouldSkipWindow({windowType: 0}, {}, _nativeRadiusRemoved)});
     `, {
         Extension: class { getSettings() { return settings; } },
         Meta: {WindowType: {NORMAL: 0}},
@@ -89,10 +89,11 @@ function setupWindowLifecycle(ready = true) {
     const actor = Object.assign(emitter(), {
         metaWindow: {...emitter(), get_monitor: () => 0},
         effects: new Map(),
-        get_effect(name) { return this.effects.get(name); },
+        get_effect(name) { return this.effects.get(name) ?? null; },
         add_effect_with_name(name, effect) { this.effects.set(name, effect); },
         remove_effect_by_name(name) { this.effects.delete(name); },
         get_first_child() { return this; },
+        get_texture() { return ready ? this : null; },
         bind_property(prop, target) {
             const copy = () => { target[prop] = this[prop]; };
             copy();
@@ -114,32 +115,26 @@ function setupWindowLifecycle(ready = true) {
     const actors = [actor];
     const state = vm.runInNewContext(`${source}
         _settings = settings;
-        buildConfig = () => ({customShadow: true});
         scaleFactor = () => 1;
-        computeBounds = () => ({});
-        refreshShadowStyle = () => {};
-        refreshShadowClip = () => {};
-        createShadow = () => shadow;
         enableEffect();
         ({disable: disableEffect, tracked: () => _actorMap.size});
     `, {
         Extension: class {},
         settings: {...emitter(), get_boolean: key => key === 'custom-shadow'},
         shadow,
+        readConfig: () => ({customShadow: true}),
+        computeWindowBounds: () => ({}),
+        refreshWindowShadowStyle() {},
+        refreshWindowShadowClip() {},
+        createWindowShadow: () => shadow,
         global: {get_window_actors: () => actors, display: {...emitter(), get_monitor_scale: () => 1}, windowManager},
         Main: {layoutManager: emitter()},
         Clutter: {Timeline},
         GObject: {BindingFlags: {SYNC_CREATE: 1}},
         RoundedCornersEffect: class { updateUniforms() {} },
         refreshShadowGeometry() {},
-        targetActor: actor => actor,
-        getWindowTexture: () => ready ? actor : null,
-        getWindowEffect: (actor, name) => actor.get_effect(name),
         shouldSkipWindow: () => false,
         clearWindowFilterCache() {},
-        connectSignal(connections, object, signal, callback) {
-            connections.push({object, id: object.connect(signal, callback)});
-        },
         disconnectSignals(connections) {
             for (const {object, id} of connections) object.disconnect(id);
             connections.length = 0;

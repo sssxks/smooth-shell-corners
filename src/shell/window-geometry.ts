@@ -1,20 +1,7 @@
-import Clutter from 'gi://Clutter';
 import Meta from 'gi://Meta';
 
 export interface WindowBounds {
     x1: number; y1: number; x2: number; y2: number;
-}
-
-export function targetActor(actor: Meta.WindowActor): Meta.WindowActor {
-    return actor;
-}
-
-export function getWindowTexture(actor: Meta.WindowActor): Meta.ShapedTexture | null {
-    return actor.get_texture();
-}
-
-export function getEffect(actor: Meta.WindowActor, effectName: string): Clutter.Effect | null {
-    return actor.get_effect(effectName);
 }
 
 export function contentOffset(win: Meta.Window | null): [number, number, number, number] {
@@ -30,9 +17,8 @@ export function contentOffset(win: Meta.Window | null): [number, number, number,
 }
 
 export function computeBounds(actor: Meta.WindowActor, scale: number, fillPadding = false): WindowBounds {
-    const target = targetActor(actor) ?? actor;
-    const targetWidth = target.width;
-    const targetHeight = target.height;
+    const targetWidth = actor.width;
+    const targetHeight = actor.height;
     const [dx, dy, dw, dh] = contentOffset(actor.metaWindow);
 
     let x1 = dx;

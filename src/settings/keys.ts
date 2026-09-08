@@ -23,4 +23,3 @@ export const SettingsKey = {
     whitelistMode: 'whitelist-mode',
 } as const;
 
-export type SettingsKeyName = typeof SettingsKey[keyof typeof SettingsKey];

@@ -1,30 +1,4 @@
-/**
- * extension.js – Smooth Shell Corners
- *
- * Applies GLSL-based rounded corners (and an optional custom shadow) to every
- * window that is not already drawn with libadwaita / libhandy.
- *
- * Signal / lifecycle flow
- * ──────────────────────
- * enable()
- *   └─ wait for shell startup → enableEffect()
- *        ├─ connect global signals   (window-created, minimize, unminimize,
- *        │                            restacked, settings changed)
- *        └─ applyEffectTo() every existing window actor
- *
- * applyEffectTo(actor)
- *   ├─ connect per-window signals  (size, texture size, fullscreen, focus,
- *   │                               workspace-changed, actor destroy)
- *   └─ onAddEffect(actor)
- *        ├─ add RoundedCornersEffect to the actor / surface
- *        ├─ create custom shadow St.Bin (below the actor in windowGroup)
- *        └─ refreshRoundedCorners()
- *
- * disable()
- *   ├─ disableEffect()    → removeEffectFrom() every actor
- *   └─ uninitPrefs()
- */
-
+// Window tracking outlives temporary exclusions; actor destruction and disable own cleanup.
 import Gio from 'gi://Gio';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
@@ -42,9 +16,6 @@ import {clearWindowFilterCache, shouldSkip as shouldSkipWindow} from './window-f
 import {disconnectSignals, type SignalConnection} from './connections.js';
 import {
     computeBounds as computeWindowBounds,
-    getEffect as getWindowEffect,
-    getWindowTexture,
-    targetActor,
 } from './window-geometry.js';
 import {
     createShadow as createWindowShadow,
@@ -53,31 +24,13 @@ import {
     refreshShadowStyle as refreshWindowShadowStyle,
 } from './shadows.js';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Constants
-// ─────────────────────────────────────────────────────────────────────────────
 const ROUNDED_CORNERS_EFFECT = 'ssc-rounded-corners';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Module-level state
-//   _settings  – Gio.Settings instance (populated by enable())
-//   _connections – list of { object, id } for global signal connections
-//   _actorMap    – Map<Meta.WindowActor, ActorData> (includes closing actors)
-//
-// ActorData = {
-//   shadow         : St.Bin | null,
-//   propertyBindings: GObject.Binding[],
-//   signalsAttached : boolean,
-//   timeoutId      : GLib.Source | 0,
-// }
-// ─────────────────────────────────────────────────────────────────────────────
 interface ActorData {
     shadow: St.Bin | null;
     bindings: GObject.Binding[];
     connections: SignalConnection[];
     animationConnections: SignalConnection[];
-    signalsAttached: boolean;
-    timeoutId: number;
 }
 
 let _settings: Gio.Settings | null = null;
@@ -89,39 +42,18 @@ let _mutterSettingsConn = 0;
 let _fractionalScaling: boolean | null = null;
 let _settingsTimeoutId = 0;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Settings helpers
-// ─────────────────────────────────────────────────────────────────────────────
 function currentSettings(): Gio.Settings {
     if (!_settings) throw new Error('Smooth Shell Corners is disabled');
     return _settings;
 }
 
-function getB(key: string) { return currentSettings().get_boolean(key); }
-
-function buildConfig() { return readConfig(currentSettings()); }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Logging
-// ─────────────────────────────────────────────────────────────────────────────
 function logDbg(msg: string) {
-    if (_settings && getB('debug-mode'))
+    if (_settings?.get_boolean('debug-mode'))
         console.log(`[SmoothShellCorners] ${msg}`);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Application type detection  (libadwaita / libhandy)
-// ─────────────────────────────────────────────────────────────────────────────
-function shouldSkip(win: Meta.Window, config: ExtensionConfig) {
-    return shouldSkipWindow(win, config, _nativeRadiusRemoved);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Actor helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
 function getEffect(actor: Meta.WindowActor) {
-    const effect = getWindowEffect(actor, ROUNDED_CORNERS_EFFECT);
+    const effect = actor.get_effect(ROUNDED_CORNERS_EFFECT);
     return effect instanceof RoundedCornersEffect ? effect : null;
 }
 
@@ -147,7 +79,7 @@ function isFractionalScalingEnabled() {
 
         const features = _mutterSettings.get_strv('experimental-features');
         const isWaylandCompositor = 'is_wayland_compositor' in Meta ? Meta.is_wayland_compositor : null;
-        const isWayland = typeof isWaylandCompositor !== 'function' || isWaylandCompositor();
+        const isWayland = typeof isWaylandCompositor !== 'function' || isWaylandCompositor() === true;
         _fractionalScaling = isWayland && features.includes('scale-monitor-framebuffer');
     } catch (_) {
         _fractionalScaling = false;
@@ -166,49 +98,6 @@ function scaleFactor(win: Meta.Window | null) {
     return global.display.get_monitor_scale(idx);
 }
 
-/**
- * Compute the offset between the window's buffer rect and its frame rect.
- * CSD windows have invisible resize grips outside the visible frame; this
- * delta lets us clip only the visible part.
- *
- * Returns [dx, dy, dw, dh] (all ≤ 0 for the width/height components).
- */
-function computeBounds(actor: Meta.WindowActor, fillPadding = false) {
-    return computeWindowBounds(actor, scaleFactor(actor.metaWindow), fillPadding);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Shadow helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-function createShadow(actor: Meta.WindowActor) {
-    return createWindowShadow(actor, scaleFactor(actor.metaWindow));
-}
-
-function refreshShadowStyle(actor: Meta.WindowActor, shadowActor: St.Bin | null, config: ExtensionConfig) {
-    refreshWindowShadowStyle(actor, shadowActor, config, scaleFactor(actor.metaWindow));
-}
-
-function refreshShadowClip(actor: Meta.WindowActor, shadowActor: St.Bin | null, config: ExtensionConfig) {
-    refreshWindowShadowClip(actor, shadowActor, config, scaleFactor(actor.metaWindow));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Effect application / removal
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Attach the RoundedCornersEffect and a custom shadow to a window actor. */
-function onAddEffect(actor: Meta.WindowActor) {
-    logDbg(`Adding effect to "${actor.metaWindow?.title}"`);
-
-    const target = targetActor(actor);
-    const data = _actorMap.get(actor);
-    if (!target || !data || !getWindowTexture(actor) || getEffect(actor)) return;
-
-    target.add_effect_with_name(ROUNDED_CORNERS_EFFECT, new RoundedCornersEffect());
-
-}
-
 function removeShadow(data: ActorData) {
     for (const binding of data.bindings)
         binding.unbind();
@@ -217,13 +106,13 @@ function removeShadow(data: ActorData) {
     data.shadow = null;
 }
 
-function syncShadow(actor: Meta.WindowActor, data: ActorData, config: ExtensionConfig) {
+function syncShadow(actor: Meta.WindowActor, data: ActorData, config: ExtensionConfig, scale: number) {
     if (!config.customShadow) {
         removeShadow(data);
         return;
     }
     if (data.shadow) return;
-    data.shadow = createShadow(actor);
+    data.shadow = createWindowShadow(actor, scale);
     for (const prop of ['pivot-point', 'translation-x', 'translation-y',
                        'scale-x', 'scale-y', 'visible', 'opacity']) {
         data.bindings.push(actor.bind_property(prop, data.shadow, prop,
@@ -238,9 +127,7 @@ function onRemoveEffect(actor: Meta.WindowActor) {
     } catch (_) {}
 
     try {
-        const target = targetActor(actor);
-        if (target)
-            target.remove_effect_by_name(ROUNDED_CORNERS_EFFECT);
+        actor.remove_effect_by_name(ROUNDED_CORNERS_EFFECT);
     } catch (_) {
         // Actor may already be destroyed
     }
@@ -259,38 +146,37 @@ function refreshRoundedCorners(actor: Meta.WindowActor) {
 
     const data = _actorMap.get(actor);
     if (!data) return;
-    const cfg = buildConfig();
-    if (shouldSkip(win, cfg)) {
+    const cfg = readConfig(currentSettings());
+    if (shouldSkipWindow(win, cfg, _nativeRadiusRemoved)) {
         onRemoveEffect(actor);
         return;
     }
 
-    onAddEffect(actor);
-    const fx = getEffect(actor);
-    if (!fx) return;
-    if (!fx.enabled) fx.enabled = true;
-
-    fx.updateUniforms(scaleFactor(win), cfg, computeBounds(actor, cfg.fillPadding),
-        global.display.get_monitor_scale(win.get_monitor()));
-
-    // Update shadow
-    if (data) {
-        syncShadow(actor, data, cfg);
-        refreshShadowStyle(actor, data.shadow, cfg);
-        refreshShadowClip(actor, data.shadow, cfg);
-
-        refreshShadowGeometry(actor, data.shadow, scaleFactor(win));
+    if (!actor.get_texture()) return;
+    let fx = getEffect(actor);
+    if (!fx) {
+        fx = new RoundedCornersEffect();
+        actor.add_effect_with_name(ROUNDED_CORNERS_EFFECT, fx);
     }
+    fx.enabled = true;
+
+    const scale = scaleFactor(win);
+    fx.updateUniforms(scale, cfg, computeWindowBounds(actor, scale, cfg.fillPadding),
+        global.display.get_monitor_scale(win.get_monitor()));
+    syncShadow(actor, data, cfg, scale);
+    refreshWindowShadowStyle(actor, data.shadow, cfg, scale);
+    refreshWindowShadowClip(actor, data.shadow, cfg, scale);
+    refreshShadowGeometry(actor, data.shadow, scale);
 }
 
 /** Refresh the shadow style / position for a single actor. */
 function refreshFocus(actor: Meta.WindowActor) {
     const data = _actorMap.get(actor);
     if (data?.shadow)
-        refreshShadowStyle(actor, data.shadow, buildConfig());
+        refreshWindowShadowStyle(actor, data.shadow, readConfig(currentSettings()), scaleFactor(actor.metaWindow));
 }
 
-/** Remove and re-add the effect for a window actor. */
+/** Refresh tracked windows without replacing their lifecycle connections. */
 function refreshAll() {
     for (const actor of global.get_window_actors())
         refreshRoundedCorners(actor);
@@ -305,28 +191,13 @@ function onRestacked() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Global signal management
-// ─────────────────────────────────────────────────────────────────────────────
-
-function disconnectAll() {
-    disconnectSignals(_connections);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Per-window signal setup / teardown
-// ─────────────────────────────────────────────────────────────────────────────
-
 function attachWindowSignals(actor: Meta.WindowActor) {
     const data = _actorMap.get(actor);
-    if (data?.signalsAttached)
-        return;
-
     if (!data) return;
 
     const win = actor.metaWindow;
     if (!win) return;
-    const texture = getWindowTexture(actor);
+    const texture = actor.get_texture();
 
     // The window-manager destroy signal starts the close animation. Keep the
     // effect until the actor itself is destroyed, after its final painted frame.
@@ -334,21 +205,19 @@ function attachWindowSignals(actor: Meta.WindowActor) {
 
     // Window resized → update shader uniforms
     data.connections.push({object: actor, id: actor.connect('notify::first-child', () => refreshRoundedCorners(actor))});
-    data.connections.push({object: actor, id: actor.connect('notify::size', () => { if (actor.metaWindow) refreshRoundedCorners(actor); })});
+    data.connections.push({object: actor, id: actor.connect('notify::size', () => refreshRoundedCorners(actor))});
     if (texture)
-        data.connections.push({object: texture, id: texture.connect('size-changed', () => { if (actor.metaWindow) refreshRoundedCorners(actor); })});
+        data.connections.push({object: texture, id: texture.connect('size-changed', () => refreshRoundedCorners(actor))});
 
     // Fullscreen state changed (may not cause a size change)
-    data.connections.push({object: win, id: win.connect('notify::fullscreen', () => { if (actor.metaWindow) refreshRoundedCorners(actor); })});
+    data.connections.push({object: win, id: win.connect('notify::fullscreen', () => refreshRoundedCorners(actor))});
     data.connections.push({object: win, id: win.connect('notify::maximized-horizontally', () => refreshRoundedCorners(actor))});
     data.connections.push({object: win, id: win.connect('notify::maximized-vertically', () => refreshRoundedCorners(actor))});
     // Focus changed → update shadow style
-    data.connections.push({object: win, id: win.connect('notify::appears-focused', () => { if (actor.metaWindow) refreshFocus(actor); })});
+    data.connections.push({object: win, id: win.connect('notify::appears-focused', () => refreshFocus(actor))});
     // Monitor / workspace change
-    data.connections.push({object: win, id: win.connect('workspace-changed', () => { if (actor.metaWindow) refreshFocus(actor); })});
+    data.connections.push({object: win, id: win.connect('workspace-changed', () => refreshFocus(actor))});
 
-    if (data)
-        data.signalsAttached = true;
 }
 
 function applyEffectTo(actor: Meta.WindowActor) {
@@ -357,8 +226,7 @@ function applyEffectTo(actor: Meta.WindowActor) {
 
     if (!_actorMap.has(actor)) {
         _actorMap.set(actor, {
-            shadow: null, bindings: [], connections: [], signalsAttached: false,
-            timeoutId: 0, animationConnections: [],
+            shadow: null, bindings: [], connections: [], animationConnections: [],
         });
         attachWindowSignals(actor);
     }
@@ -379,10 +247,6 @@ function removeEffectFrom(actor: Meta.WindowActor) {
     onRemoveEffect(actor);
     _actorMap.delete(actor);
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Global enable / disable
-// ─────────────────────────────────────────────────────────────────────────────
 
 function enableEffect() {
     const settings = currentSettings();
@@ -464,7 +328,7 @@ function disableEffect() {
     // Closing actors can already be absent from get_window_actors().
     for (const actor of _actorMap.keys())
         removeEffectFrom(actor);
-    disconnectAll();
+    disconnectSignals(_connections);
     
     if (_settingsTimeoutId) {
         GLib.source_remove(_settingsTimeoutId);
@@ -477,10 +341,6 @@ function disableEffect() {
         _mutterSettingsConn = 0;
     }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Extension class
-// ─────────────────────────────────────────────────────────────────────────────
 
 export default class SmoothShellCornersExtension extends Extension {
 

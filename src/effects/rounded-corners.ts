@@ -17,7 +17,11 @@ export const RoundedCornersEffect = GObject.registerClass(
     { GTypeName: 'SSCRoundedCornersEffect' },
     class RoundedCornersEffect extends Clutter.Effect {
 
-        _u: Record<'fillPadding' | 'sampleBounds' | 'bounds' | 'clipRadius' | 'borderWidth' | 'borderColor' | 'borderedAreaBounds' | 'borderedAreaClipRadius' | 'exponent' | 'pixelStep' | 'textureOrigin', number> | null = null;
+        _u: Record<
+            'fillPadding' | 'sampleBounds' | 'bounds' | 'clipRadius' | 'borderWidth' |
+            'borderColor' | 'borderedAreaBounds' | 'borderedAreaClipRadius' |
+            'exponent' | 'pixelStep' | 'textureOrigin', number
+        > | null = null;
         _pipeline: Cogl.Pipeline | null = null;
         _framebuffer: Cogl.Offscreen | null = null;
         _paintScale = 1;
