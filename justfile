@@ -10,8 +10,7 @@ build:
 
 check:
     npm run check
-    gjs -m tests/unit/native-radius.test.js
-    gjs -m tests/unit/preferences.test.js
+    npm run test:gjs
 
 install: build
     ./install.sh

@@ -8,6 +8,8 @@
     "check": "npm run typecheck && npm run lint && npm run build && npm test",
     "lint": "eslint .",
     "test": "node --test tests/unit/*.test.mjs",
+    "test:gjs": "gjs -m tests/unit/native-radius.test.js && gjs -m tests/unit/preferences.test.js",
+    "test:all": "npm run test && npm run test:gjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
