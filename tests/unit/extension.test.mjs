@@ -87,7 +87,7 @@ function setupWindowLifecycle() {
         };
     }
     const actor = Object.assign(emitter(), {
-        metaWindow: emitter(),
+        metaWindow: {...emitter(), get_monitor: () => 0},
         effects: new Map(),
         get_effect(name) { return this.effects.get(name); },
         add_effect_with_name(name, effect) { this.effects.set(name, effect); },
@@ -112,7 +112,11 @@ function setupWindowLifecycle() {
     const actors = [actor];
     const state = vm.runInNewContext(`${source}
         _settings = settings;
-        refreshRoundedCorners = () => {};
+        buildConfig = () => ({});
+        scaleFactor = () => 1;
+        computeBounds = () => ({});
+        refreshShadowStyle = () => {};
+        refreshShadowClip = () => {};
         createShadow = () => shadow;
         enableEffect();
         ({disable: disableEffect, tracked: () => _actorMap.size});
@@ -120,10 +124,11 @@ function setupWindowLifecycle() {
         Extension: class {},
         settings: {...emitter(), get_boolean: key => key === 'custom-shadow'},
         shadow,
-        global: {get_window_actors: () => actors, display: emitter(), windowManager},
+        global: {get_window_actors: () => actors, display: {...emitter(), get_monitor_scale: () => 1}, windowManager},
         Main: {layoutManager: emitter()},
         GObject: {BindingFlags: {SYNC_CREATE: 1}},
-        RoundedCornersEffect: class {},
+        RoundedCornersEffect: class { updateUniforms() {} },
+        refreshShadowGeometry() {},
         targetActor: actor => actor,
         getWindowTexture: () => actor,
         getWindowEffect: (actor, name) => actor.get_effect(name),

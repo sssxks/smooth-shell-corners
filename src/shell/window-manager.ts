@@ -184,19 +184,9 @@ function refreshShadowClip(actor, shadowActor) {
 function onAddEffect(actor) {
     logDbg(`Adding effect to "${actor.metaWindow.title}"`);
 
-    const win = actor.metaWindow;
-    if (shouldSkip(win)) {
-        logDbg(`  → skipped`);
-        return;
-    }
-
     const target = targetActor(actor);
-    if (!target) return;
-
-    if (_actorMap.has(actor) || target.get_effect(ROUNDED_CORNERS_EFFECT)) {
-        refreshRoundedCorners(actor);
-        return;
-    }
+    const data = _actorMap.get(actor);
+    if (!target || !data || getEffect(actor)) return;
 
     target.add_effect_with_name(ROUNDED_CORNERS_EFFECT, new RoundedCornersEffect());
 
@@ -214,14 +204,8 @@ function onAddEffect(actor) {
         }
     }
 
-    _actorMap.set(actor, {
-        shadow,
-        bindings,
-        connections: [],
-        signalsAttached: false,
-        timeoutId: 0,
-    });
-    refreshRoundedCorners(actor);
+    data.shadow = shadow;
+    data.bindings = bindings;
 }
 
 /** Remove effects and shadow from a window actor. */
@@ -240,14 +224,6 @@ function onRemoveEffect(actor) {
 
     const data = _actorMap.get(actor);
     if (!data) return;
-
-    // Disconnect per-window signals safely
-    if (data.connections) {
-        for (const c of data.connections) {
-            try { c.obj.disconnect(c.id); } catch (_) {}
-        }
-        data.connections = [];
-    }
 
     // Unbind property mirrors
     for (const b of data.bindings)
@@ -269,7 +245,8 @@ function onRemoveEffect(actor) {
     if (data.timeoutId)
         GLib.source_remove(data.timeoutId);
 
-    _actorMap.delete(actor);
+    data.shadow = null;
+    data.bindings = [];
 }
 
 /** Recompute and push all shader uniforms for a single window. */
@@ -278,24 +255,15 @@ function refreshRoundedCorners(actor) {
     if (!win) return;
 
     const data = _actorMap.get(actor);
-    const fx   = getEffect(actor);
-
-    // If neither the effect nor actor data exists, add the effect.
-    // Guard against re-entry: only call onAddEffect when there is no _actorMap
-    // entry yet (avoids the infinite loop onAddEffect → refreshRoundedCorners
-    // → onAddEffect …). onAddEffect calls refreshRoundedCorners itself at the
-    // end, so we just return here.
-    if (!fx && !data) {
-        onAddEffect(actor);
-        return;
-    }
-
+    if (!data) return;
     if (shouldSkip(win)) {
-        if (data) onRemoveEffect(actor);
+        onRemoveEffect(actor);
         return;
     }
 
-    if (!fx) return;   // effect was removed due to shouldSkip during onAddEffect
+    onAddEffect(actor);
+    const fx = getEffect(actor);
+    if (!fx) return;
     if (!fx.enabled) fx.enabled = true;
 
     const cfg = buildConfig();
@@ -374,6 +342,8 @@ function attachWindowSignals(actor) {
 
     // Fullscreen state changed (may not cause a size change)
     addWinConn(win, 'notify::fullscreen',     () => { if (actor.metaWindow) refreshRoundedCorners(actor); });
+    addWinConn(win, 'notify::maximized-horizontally', () => refreshRoundedCorners(actor));
+    addWinConn(win, 'notify::maximized-vertically', () => refreshRoundedCorners(actor));
     // Focus changed → update shadow style
     addWinConn(win, 'notify::appears-focused',() => { if (actor.metaWindow) refreshFocus(actor); });
     // Monitor / workspace change
@@ -419,7 +389,10 @@ function applyEffectTo(actor) {
     // before the effect, adding the effect could trigger notify::size
     // synchronously, causing re-entrant calls to refreshRoundedCorners
     // before _actorMap has been populated.
-    onAddEffect(actor);
+    _actorMap.set(actor, {
+        shadow: null, bindings: [], connections: [], signalsAttached: false, timeoutId: 0,
+    });
+    refreshRoundedCorners(actor);
     attachWindowSignals(actor);
 }
 
@@ -444,7 +417,12 @@ function applyEffectToWindow(win) {
 }
 
 function removeEffectFrom(actor) {
+    const data = _actorMap.get(actor);
+    if (!data) return;
+    for (const {obj, id} of data.connections)
+        obj.disconnect(id);
     onRemoveEffect(actor);
+    _actorMap.delete(actor);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

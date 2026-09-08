@@ -35,6 +35,7 @@ with tempfile.TemporaryDirectory(prefix="ssc-compositor-") as temporary:
         return subprocess.run(args, env=env, text=True, capture_output=True,
                               timeout=timeout, check=True).stdout
 
+    (root / "flatpaks").mkdir()
     probe = root / "data/gnome-shell/extensions/ssc-probe@local"
     probe.mkdir(parents=True)
     (probe / "metadata.json").write_text(json.dumps({"uuid": "ssc-probe@local",
@@ -47,6 +48,7 @@ import Cogl from 'gi://Cogl';
 import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import Extension from '{repo.as_uri()}/dist/extension.js';
 import {{RoundedCornersEffect}} from '{repo.as_uri()}/dist/effects/rounded-corners.js';
 import {{shadowFixture}} from '{repo.as_uri()}/tests/compositor/shadow-fixture.js';
 const Pass = GObject.registerClass(class SSCProbePass extends Shell.GLSLEffect {{
@@ -55,7 +57,12 @@ const Pass = GObject.registerClass(class SSCProbePass extends Shell.GLSLEffect {
 export default class Probe {{
     enable() {{
         global.context.unsafe_mode = true;
-        global.ssc = {{RoundedCornersEffect, Pass, Clutter, makeShadow: shadowFixture}};
+        const extension = new Extension({{uuid:'smooth-shell-corners@xks', name:'Smooth Shell Corners',
+            path:'{repo}/dist', dir:Gio.File.new_for_path('{repo}/dist'),
+            'settings-schema':'org.gnome.shell.extensions.smooth-shell-corners'}});
+        const settings = extension.getSettings();
+        settings.set_boolean('skip-libadwaita-app', false);
+        global.ssc = {{RoundedCornersEffect, Pass, Clutter, makeShadow: shadowFixture, extension, settings}};
         this.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {{
             Main.overview.hide();
             this.owner = Gio.bus_own_name(Gio.BusType.SESSION, 'org.example.SSCProbe',
@@ -77,7 +84,8 @@ export default class Probe {{
     launch.write_text('printf "%s\\n" "$DBUS_SESSION_BUS_ADDRESS"\n'
         'exec gnome-shell --headless --wayland --no-x11 --virtual-monitor=1920x1080 '
         '--wayland-display=ssc-test > "$XDG_CACHE_HOME/shell.log" 2>&1\n')
-    shell = subprocess.Popen(["dbus-run-session", "--", "bash", str(launch)], env=env,
+    shell = subprocess.Popen(["bwrap", "--dev-bind", "/", "/", "--bind", str(root / "flatpaks"),
+                              str(Path.home() / ".var/app"), "--", "dbus-run-session", "--", "bash", str(launch)], env=env,
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                              text=True, start_new_session=True)
     app = None
@@ -98,6 +106,27 @@ export default class Probe {{
             return control("eval", code)
 
         evaluate("global.ssc.actor = global.get_window_actors().find(a => a.metaWindow.title === 'SSC text test'); true;")
+
+        def eventually(expression):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                if evaluate(expression):
+                    return
+                time.sleep(0.05)
+            raise AssertionError(expression)
+
+        # Exercise the actual lifecycle before the independent renderer probes.
+        effect = "global.ssc.actor.get_effect('ssc-rounded-corners') !== null"
+        evaluate("global.ssc.extension.enable(); true;")
+        eventually(effect)
+        for _ in range(2):
+            evaluate("global.ssc.actor.metaWindow.make_fullscreen(); true;")
+            eventually(f"global.ssc.actor.metaWindow.fullscreen && !({effect})")
+            evaluate("global.ssc.actor.metaWindow.unmake_fullscreen(); true;")
+            eventually(f"!global.ssc.actor.metaWindow.fullscreen && ({effect})")
+        evaluate("global.ssc.extension.disable(); true;")
+        eventually(f"!({effect})")
+        print("Fullscreen lifecycle restores corners on every transition.", flush=True)
 
         def capture(name):
             path = root / (name + ".png")
