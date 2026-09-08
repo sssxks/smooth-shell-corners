@@ -28,6 +28,19 @@ export interface ShadowConfig {
     yOffset: number;
 }
 
+const SHADOW_KEYS = {
+    focused: {
+        opacity: 'focused-shadow-opacity', blur: 'focused-shadow-blur',
+        spread: 'focused-shadow-spread', xOffset: 'focused-shadow-x-offset',
+        yOffset: 'focused-shadow-y-offset',
+    },
+    unfocused: {
+        opacity: 'unfocused-shadow-opacity', blur: 'unfocused-shadow-blur',
+        spread: 'unfocused-shadow-spread', xOffset: 'unfocused-shadow-x-offset',
+        yOffset: 'unfocused-shadow-y-offset',
+    },
+} as const;
+
 export function readCornerConfig(settings: Gio.Settings): CornerConfig {
     return {
         cornerRadius: settings.get_int(SettingsKey.cornerRadius),
@@ -52,13 +65,11 @@ export function readCornerConfig(settings: Gio.Settings): CornerConfig {
 }
 
 export function readShadowConfig(settings: Gio.Settings, focused: boolean): ShadowConfig {
-    const prefix = focused ? 'focused-shadow' : 'unfocused-shadow';
+    const keys = focused ? SHADOW_KEYS.focused : SHADOW_KEYS.unfocused;
     return {
-        opacity: settings.get_int(`${prefix}-opacity`),
-        blur: settings.get_int(`${prefix}-blur`),
-        spread: settings.get_int(`${prefix}-spread`),
-        xOffset: settings.get_int(`${prefix}-x-offset`),
-        yOffset: settings.get_int(`${prefix}-y-offset`),
+        opacity: settings.get_int(keys.opacity), blur: settings.get_int(keys.blur),
+        spread: settings.get_int(keys.spread), xOffset: settings.get_int(keys.xOffset),
+        yOffset: settings.get_int(keys.yOffset),
     };
 }
 
