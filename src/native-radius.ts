@@ -7,7 +7,7 @@ const END = '/* END Smooth Shell Corners native radius */\n';
 // Target top-level client-decorated windows, not in-app dialogs or popovers.
 // Override the actual property: --window-radius is absent in older GTK4 and
 // is also used by apps for unrelated styling such as focus rings.
-export const NATIVE_RADIUS_CSS = 'window.csd { border-radius: 0; }\n';
+export const NATIVE_RADIUS_CSS = 'window.csd { border-radius: 0; box-shadow: none; }\n';
 
 export function updateCss(css: string, enabled: boolean): string {
     const start = css.indexOf(BEGIN);

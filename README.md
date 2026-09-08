@@ -223,7 +223,8 @@ Default shadow values:
 
 #### Native GTK4 corner removal
 
-Enable **Replace native GTK4 corners** to provide rectangular window content to
+Enable **Replace native GTK4 corners** to provide rectangular window content and
+remove the GTK client shadow so that
 the shader, avoiding samples from libadwaita's transparent native corners. This
 makes **Leave libadwaita windows unchanged** inapplicable while active, preserving
 your exclusion preference for when you turn it off. Your radius, smoothing and
