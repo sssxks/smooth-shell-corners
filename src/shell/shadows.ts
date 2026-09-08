@@ -1,10 +1,9 @@
 import Clutter from 'gi://Clutter';
-import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
 import St from 'gi://St';
 
 import {ClipShadowEffect} from '../effects/index.js';
-import {readCornerConfig, readShadowConfig, type ShadowConfig} from '../settings/config.js';
+import type {CornerConfig, ExtensionConfig, ShadowConfig} from '../settings/config.js';
 import {computeBounds, contentOffset} from './window-geometry.js';
 
 const CLIP_SHADOW_EFFECT = 'ssc-clip-shadow';
@@ -19,7 +18,7 @@ export function boxShadowCss(config: ShadowConfig, scale: number): string {
     return `box-shadow: ${x}px ${y}px ${blur}px ${spread}px rgba(0,0,0,${alpha})`;
 }
 
-export function createShadow(actor: Meta.WindowActor, settings: Gio.Settings, scale: number): St.Bin {
+export function createShadow(actor: Meta.WindowActor, scale: number): St.Bin {
     const shadow = new St.Bin({
         name: 'SSC Shadow',
         style: 'background: transparent;',
@@ -41,14 +40,13 @@ export function createShadow(actor: Meta.WindowActor, settings: Gio.Settings, sc
 
     shadow.add_effect_with_name(CLIP_SHADOW_EFFECT, new ClipShadowEffect());
     global.windowGroup.insert_child_below(shadow, actor);
-    refreshShadowStyle(actor, shadow, settings, scale);
     return shadow;
 }
 
 export function refreshShadowStyle(
     actor: Meta.WindowActor,
     shadowActor: St.Bin | null,
-    settings: Gio.Settings,
+    config: ExtensionConfig,
     scale: number,
 ): void {
     if (!shadowActor)
@@ -57,8 +55,8 @@ export function refreshShadowStyle(
     const themeScale = St.ThemeContext.get_for_stage(global.stage).scale_factor;
     const cssScale = scale / themeScale;
     const padding = SHADOW_PADDING * cssScale;
-    const config = readCornerConfig(settings);
-    const shadowConfig = readShadowConfig(settings, actor.metaWindow?.appears_focused ?? false);
+    const shadowConfig = actor.metaWindow?.appears_focused
+        ? config.focusedShadow : config.unfocusedShadow;
     const exponent = config.smoothing * 10 + 2;
     const radius = config.cornerRadius * 0.5 * exponent * cssScale;
     const inner = shadowActor.get_first_child();
@@ -69,7 +67,7 @@ export function refreshShadowStyle(
     if (!win) return;
     const maximized = win.maximizedHorizontally || win.maximizedVertically;
     const hidden = (maximized || win.fullscreen) &&
-        !settings.get_boolean('keep-shadow-maximized');
+        !config.keepShadowMaximized;
 
     shadowActor.style = `padding: ${padding}px;`;
     inner.style = hidden
@@ -86,7 +84,7 @@ export function refreshShadowStyle(
 export function refreshShadowClip(
     actor: Meta.WindowActor,
     shadowActor: St.Bin | null,
-    settings: Gio.Settings,
+    config: CornerConfig,
     scale: number,
 ): void {
     if (!shadowActor)
@@ -102,7 +100,6 @@ export function refreshShadowClip(
     if (width <= 0 || height <= 0)
         return;
 
-    const config = readCornerConfig(settings);
     const outerRadius = config.cornerRadius * scale;
     let exponent = config.smoothing * 10 + 2;
     let radius = outerRadius * 0.5 * exponent;

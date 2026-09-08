@@ -61,3 +61,28 @@ export function readShadowConfig(settings: Gio.Settings, focused: boolean): Shad
         yOffset: settings.get_int(`${prefix}-y-offset`),
     };
 }
+
+export interface ExtensionConfig extends CornerConfig {
+    customShadow: boolean;
+    keepShadowMaximized: boolean;
+    focusedShadow: ShadowConfig;
+    unfocusedShadow: ShadowConfig;
+    blacklist: string[];
+    whitelistMode: boolean;
+    skipLibadwaitaApp: boolean;
+    skipLibhandyApp: boolean;
+}
+
+export function readConfig(settings: Gio.Settings): ExtensionConfig {
+    return {
+        ...readCornerConfig(settings),
+        customShadow: settings.get_boolean(SettingsKey.customShadow),
+        keepShadowMaximized: settings.get_boolean(SettingsKey.keepShadowMaximized),
+        focusedShadow: readShadowConfig(settings, true),
+        unfocusedShadow: readShadowConfig(settings, false),
+        blacklist: settings.get_strv(SettingsKey.blacklist),
+        whitelistMode: settings.get_boolean(SettingsKey.whitelistMode),
+        skipLibadwaitaApp: settings.get_boolean(SettingsKey.skipLibadwaitaApp),
+        skipLibhandyApp: settings.get_boolean(SettingsKey.skipLibhandyApp),
+    };
+}

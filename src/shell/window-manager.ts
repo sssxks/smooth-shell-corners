@@ -37,7 +37,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {RoundedCornersEffect} from '../effects/index.js';
 import { setNativeRadiusRemoved } from '../native-radius.js';
-import {readCornerConfig} from '../settings/config.js';
+import {readConfig, type ExtensionConfig} from '../settings/config.js';
 import {clearWindowFilterCache, shouldSkip as shouldSkipWindow} from './window-filter.js';
 import {disconnectSignals, type SignalConnection} from './connections.js';
 import {
@@ -99,7 +99,7 @@ function currentSettings(): Gio.Settings {
 
 function getB(key: string) { return currentSettings().get_boolean(key); }
 
-function buildConfig() { return readCornerConfig(currentSettings()); }
+function buildConfig() { return readConfig(currentSettings()); }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Logging
@@ -112,8 +112,8 @@ function logDbg(msg: string) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Application type detection  (libadwaita / libhandy)
 // ─────────────────────────────────────────────────────────────────────────────
-function shouldSkip(win: Meta.Window) {
-    return shouldSkipWindow(win, currentSettings(), _nativeRadiusRemoved);
+function shouldSkip(win: Meta.Window, config: ExtensionConfig) {
+    return shouldSkipWindow(win, config, _nativeRadiusRemoved);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -182,15 +182,15 @@ function computeBounds(actor: Meta.WindowActor, fillPadding = false) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function createShadow(actor: Meta.WindowActor) {
-    return createWindowShadow(actor, currentSettings(), scaleFactor(actor.metaWindow));
+    return createWindowShadow(actor, scaleFactor(actor.metaWindow));
 }
 
-function refreshShadowStyle(actor: Meta.WindowActor, shadowActor: St.Bin | null) {
-    refreshWindowShadowStyle(actor, shadowActor, currentSettings(), scaleFactor(actor.metaWindow));
+function refreshShadowStyle(actor: Meta.WindowActor, shadowActor: St.Bin | null, config: ExtensionConfig) {
+    refreshWindowShadowStyle(actor, shadowActor, config, scaleFactor(actor.metaWindow));
 }
 
-function refreshShadowClip(actor: Meta.WindowActor, shadowActor: St.Bin | null) {
-    refreshWindowShadowClip(actor, shadowActor, currentSettings(), scaleFactor(actor.metaWindow));
+function refreshShadowClip(actor: Meta.WindowActor, shadowActor: St.Bin | null, config: ExtensionConfig) {
+    refreshWindowShadowClip(actor, shadowActor, config, scaleFactor(actor.metaWindow));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -217,8 +217,8 @@ function removeShadow(data: ActorData) {
     data.shadow = null;
 }
 
-function syncShadow(actor: Meta.WindowActor, data: ActorData) {
-    if (!getB('custom-shadow')) {
+function syncShadow(actor: Meta.WindowActor, data: ActorData, config: ExtensionConfig) {
+    if (!config.customShadow) {
         removeShadow(data);
         return;
     }
@@ -259,7 +259,8 @@ function refreshRoundedCorners(actor: Meta.WindowActor) {
 
     const data = _actorMap.get(actor);
     if (!data) return;
-    if (shouldSkip(win)) {
+    const cfg = buildConfig();
+    if (shouldSkip(win, cfg)) {
         onRemoveEffect(actor);
         return;
     }
@@ -269,15 +270,14 @@ function refreshRoundedCorners(actor: Meta.WindowActor) {
     if (!fx) return;
     if (!fx.enabled) fx.enabled = true;
 
-    const cfg = buildConfig();
     fx.updateUniforms(scaleFactor(win), cfg, computeBounds(actor, cfg.fillPadding),
         global.display.get_monitor_scale(win.get_monitor()));
 
     // Update shadow
     if (data) {
-        syncShadow(actor, data);
-        refreshShadowStyle(actor, data.shadow);
-        refreshShadowClip(actor, data.shadow);
+        syncShadow(actor, data, cfg);
+        refreshShadowStyle(actor, data.shadow, cfg);
+        refreshShadowClip(actor, data.shadow, cfg);
 
         refreshShadowGeometry(actor, data.shadow, scaleFactor(win));
     }
@@ -287,7 +287,7 @@ function refreshRoundedCorners(actor: Meta.WindowActor) {
 function refreshFocus(actor: Meta.WindowActor) {
     const data = _actorMap.get(actor);
     if (data?.shadow)
-        refreshShadowStyle(actor, data.shadow);
+        refreshShadowStyle(actor, data.shadow, buildConfig());
 }
 
 /** Remove and re-add the effect for a window actor. */

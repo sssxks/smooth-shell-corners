@@ -1,6 +1,6 @@
 import St from 'gi://St';
-import {createShadow, refreshShadowClip} from '../../dist/shell/shadows.js';
-import {readCornerConfig} from '../../dist/settings/config.js';
+import {createShadow, refreshShadowStyle, refreshShadowClip} from '../../dist/shell/shadows.js';
+import {readConfig} from '../../dist/settings/config.js';
 import {computeBounds} from '../../dist/shell/window-geometry.js';
 import {RoundedCornersEffect} from '../../dist/effects/rounded-corners.js';
 
@@ -21,15 +21,17 @@ export function shadowFixture(fill, blur, spread, xOffset, yOffset, scale) {
         'focused-shadow-opacity': 255, 'focused-shadow-blur': blur,
         'focused-shadow-spread': spread, 'focused-shadow-x-offset': xOffset,
         'focused-shadow-y-offset': yOffset};
-    const settings = {get_int: key => values[key] ?? 0,
+    const settings = {get_strv: () => [], get_int: key => values[key] ?? 0,
         get_double: key => values[key] ?? 0, get_boolean: key => values[key] ?? false};
     global.windowGroup.add_child(background);
     global.windowGroup.add_child(actor);
-    const shadow = createShadow(actor, settings, 1);
-    refreshShadowClip(actor, shadow, settings, 1);
+    const config = readConfig(settings);
+    const shadow = createShadow(actor, 1);
+    refreshShadowStyle(actor, shadow, config, 1);
+    refreshShadowClip(actor, shadow, config, 1);
     const effect = new RoundedCornersEffect();
     actor.add_effect(effect);
-    effect.updateUniforms(1, readCornerConfig(settings), computeBounds(actor, 1, fill), scale);
+    effect.updateUniforms(1, config, computeBounds(actor, 1, fill), scale);
     global.ssc.shadowFixture = [actor, shadow, background];
     return true;
 }

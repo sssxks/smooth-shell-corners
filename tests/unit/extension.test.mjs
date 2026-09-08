@@ -29,7 +29,7 @@ function setup(failEnable = false) {
         getAppType = () => 'LibAdwaita';
         shouldSkipWindow = () => _settings.get_boolean('skip-libadwaita-app') &&
             !_nativeRadiusRemoved;
-        ({instance: new SmoothShellCornersExtension(), skip: () => shouldSkip({windowType: 0})});
+        ({instance: new SmoothShellCornersExtension(), skip: () => shouldSkip({windowType: 0}, {})});
     `, {
         Extension: class { getSettings() { return settings; } },
         Meta: {WindowType: {NORMAL: 0}},
@@ -114,7 +114,7 @@ function setupWindowLifecycle(ready = true) {
     const actors = [actor];
     const state = vm.runInNewContext(`${source}
         _settings = settings;
-        buildConfig = () => ({});
+        buildConfig = () => ({customShadow: true});
         scaleFactor = () => 1;
         computeBounds = () => ({});
         refreshShadowStyle = () => {};

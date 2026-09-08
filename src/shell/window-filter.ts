@@ -1,9 +1,8 @@
-import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 
-import {readCornerConfig} from '../settings/config.js';
+import type {ExtensionConfig} from '../settings/config.js';
 
 type AppType = 'Other' | 'LibAdwaita' | 'LibHandy';
 const appTypeCache = new Map<number, AppType>();
@@ -92,7 +91,7 @@ function getAppType(win: Meta.Window): AppType {
 
 export function shouldSkip(
     win: Meta.Window,
-    settings: Gio.Settings,
+    config: ExtensionConfig,
     nativeRadiusRemoved: boolean,
 ): boolean {
     const identifiers = getWindowIdentifiers(win);
@@ -103,22 +102,20 @@ export function shouldSkip(
     if (!ROUNDABLE_WINDOW_TYPES.includes(windowType))
         return true;
 
-    const blacklist = settings.get_strv('blacklist');
-    const whitelistMode = settings.get_boolean('whitelist-mode');
+    const {blacklist, whitelistMode} = config;
     const isListed = isListedWindow(identifiers, blacklist);
     if (whitelistMode ? !isListed : isListed)
         return true;
 
     const appType = getAppType(win);
     if (!nativeRadiusRemoved &&
-        settings.get_boolean('skip-libadwaita-app') &&
+        config.skipLibadwaitaApp &&
         appType === 'LibAdwaita' &&
         !isListed)
         return true;
-    if (settings.get_boolean('skip-libhandy-app') && appType === 'LibHandy' && !isListed)
+    if (config.skipLibhandyApp && appType === 'LibHandy' && !isListed)
         return true;
 
-    const config = readCornerConfig(settings);
     const isMaximized = win.maximizedHorizontally || win.maximizedVertically;
     if (isMaximized && !config.keepRoundedMaximized)
         return true;
