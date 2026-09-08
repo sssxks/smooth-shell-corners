@@ -1,8 +1,8 @@
-// gjs -m tests/native-radius.js — real Gio file operations in a temp directory.
+// gjs -m tests/unit/native-radius.test.js
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk?version=4.0';
-import {nativeCssFiles, NATIVE_RADIUS_CSS, setNativeRadiusRemoved, updateCss} from '../native-radius.js';
+import {nativeCssFiles, NATIVE_RADIUS_CSS, setNativeRadiusRemoved, updateCss} from '../../dist/native-radius.js';
 
 function assert(condition, message) {
     if (!condition) throw new Error(message);

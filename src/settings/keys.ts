@@ -1,0 +1,26 @@
+export const SettingsKey = {
+    blacklist: 'blacklist',
+    borderAlpha: 'border-alpha',
+    borderBlue: 'border-blue',
+    borderGreen: 'border-green',
+    borderRed: 'border-red',
+    borderWidth: 'border-width',
+    cornerRadius: 'corner-radius',
+    customShadow: 'custom-shadow',
+    debugMode: 'debug-mode',
+    fillPadding: 'fill-padding',
+    keepRoundedFullscreen: 'keep-rounded-fullscreen',
+    keepRoundedMaximized: 'keep-rounded-maximized',
+    keepShadowMaximized: 'keep-shadow-maximized',
+    paddingBottom: 'padding-bottom',
+    paddingLeft: 'padding-left',
+    paddingRight: 'padding-right',
+    paddingTop: 'padding-top',
+    removeNativeRadius: 'remove-native-radius',
+    skipLibadwaitaApp: 'skip-libadwaita-app',
+    skipLibhandyApp: 'skip-libhandy-app',
+    smoothing: 'smoothing',
+    whitelistMode: 'whitelist-mode',
+} as const;
+
+export type SettingsKeyName = typeof SettingsKey[keyof typeof SettingsKey];

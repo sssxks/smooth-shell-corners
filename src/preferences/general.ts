@@ -1,103 +1,13 @@
-/**
- * prefs.js – Preferences window for Smooth Shell Corners
- *
- * UI is built with libadwaita (Adw) widgets on top of GTK4, following the
- * GNOME 45+ ExtensionPreferences API.
- */
-
 import Adw from 'gi://Adw';
 import Gdk from 'gi://Gdk';
-import GLib from 'gi://GLib';
-import GObject from 'gi://GObject';
+import Gio from 'gi://Gio';
 import Gtk from 'gi://Gtk';
 
-import {
-    ExtensionPreferences,
-    gettext as _,
-} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
+import {gettext as _} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Small GTK4 helpers
-// ─────────────────────────────────────────────────────────────────────────────
+import {bindAdjustmentDouble as bindAdjDbl, bindAdjustmentInt as bindAdjInt, bindBoolean as bindBool, createSpinRow as makeSpinRow} from './widgets.js';
 
-/** Bind a Gtk.Adjustment to a GSettings integer key (bidirectional). */
-function bindAdjInt(settings, key, adj) {
-    adj.value = settings.get_int(key);
-    adj.connect('value-changed', a => settings.set_int(key, a.value));
-    settings.connect(`changed::${key}`, () => {
-        if (adj.value !== settings.get_int(key))
-            adj.value = settings.get_int(key);
-    });
-}
-
-/** Bind a Gtk.Adjustment to a GSettings double key (bidirectional). */
-function bindAdjDbl(settings, key, adj) {
-    adj.value = settings.get_double(key);
-    adj.connect('value-changed', a => settings.set_double(key, a.value));
-    settings.connect(`changed::${key}`, () => {
-        if (Math.abs(adj.value - settings.get_double(key)) > 1e-9)
-            adj.value = settings.get_double(key);
-    });
-}
-
-/** Bind a Gtk.Switch / Adw.SwitchRow active state to a GSettings bool key. */
-function bindBool(settings, key, widget) {
-    settings.bind(key, widget, 'active', 0);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Spin-row builder (Adw.ActionRow + Gtk.SpinButton as suffix widget)
-// ─────────────────────────────────────────────────────────────────────────────
-function makeSpinRow(title, subtitle, min, max, step, digits = 0) {
-    const adj  = new Gtk.Adjustment({ lower: min, upper: max, step_increment: step });
-    const spin = new Gtk.SpinButton({
-        adjustment:   adj,
-        digits:       digits,
-        valign:       Gtk.Align.CENTER,
-        width_chars:  5,
-    });
-    const row = new Adw.ActionRow({ title, subtitle });
-    row.add_suffix(spin);
-    row.activatable_widget = spin;
-    return { row, adj, spin };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Shadow group builder
-// ─────────────────────────────────────────────────────────────────────────────
-function makeShadowGroup(title, prefix, settings) {
-    const grp = new Adw.PreferencesGroup({ title });
-
-    const opacity = makeSpinRow(_('Opacity'),  '',  0, 255, 1);
-    const blur    = makeSpinRow(_('Blur'),      '',  0, 120, 1);
-    const spread  = makeSpinRow(_('Spread'),    '', -50,  50, 1);
-    const xOff    = makeSpinRow(_('X offset'),  '', -100, 100, 1);
-    const yOff    = makeSpinRow(_('Y offset'),  '', -100, 100, 1);
-
-    bindAdjInt(settings, `${prefix}-opacity`,  opacity.adj);
-    bindAdjInt(settings, `${prefix}-blur`,     blur.adj);
-    bindAdjInt(settings, `${prefix}-spread`,   spread.adj);
-    bindAdjInt(settings, `${prefix}-x-offset`, xOff.adj);
-    bindAdjInt(settings, `${prefix}-y-offset`, yOff.adj);
-
-    grp.add(opacity.row);
-    grp.add(blur.row);
-    grp.add(spread.row);
-    grp.add(xOff.row);
-    grp.add(yOff.row);
-
-    return grp;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Main preferences class
-// ─────────────────────────────────────────────────────────────────────────────
-export default class SmoothShellCornersPreferences extends ExtensionPreferences {
-
-    fillPreferencesWindow(win) {
-        const settings = this.getSettings();
-        win.set_default_size(680, 720);
-
+export function addCornerPreferences(win: Adw.PreferencesWindow, settings: Gio.Settings): void {
         // ── Page 1: Corners ─────────────────────────────────────────────────
         const cornersPage = new Adw.PreferencesPage({
             title: _('Corners'),
@@ -208,35 +118,9 @@ export default class SmoothShellCornersPreferences extends ExtensionPreferences 
         bindBool(settings, 'keep-rounded-fullscreen', fullRow);
         behGroup.add(fullRow);
 
-        // ── Page 2: Shadow ───────────────────────────────────────────────────
-        const shadowPage = new Adw.PreferencesPage({
-            title:     _('Shadow'),
-            icon_name: 'weather-overcast-symbolic',
-        });
-        win.add(shadowPage);
+}
 
-        // Enable / disable custom shadow
-        const shadowToggleGroup = new Adw.PreferencesGroup();
-        shadowPage.add(shadowToggleGroup);
-
-        const shadowRow = new Adw.SwitchRow({
-            title:    _('Custom shadow'),
-            subtitle: _('Replace the rectangular GNOME shadow with a rounded one'),
-        });
-        bindBool(settings, 'custom-shadow', shadowRow);
-        shadowToggleGroup.add(shadowRow);
-
-        const keepShadowRow = new Adw.SwitchRow({
-            title:    _('Shadow when maximised'),
-            subtitle: _('Keep the custom shadow when the window is maximised or full-screen'),
-        });
-        bindBool(settings, 'keep-shadow-maximized', keepShadowRow);
-        shadowToggleGroup.add(keepShadowRow);
-
-        // Focused / unfocused shadow settings
-        shadowPage.add(makeShadowGroup(_('Focused window'),   'focused-shadow',   settings));
-        shadowPage.add(makeShadowGroup(_('Unfocused window'), 'unfocused-shadow', settings));
-
+export function addApplicationPreferences(win: Adw.PreferencesWindow, settings: Gio.Settings): void {
         // ── Page 3: Applications ─────────────────────────────────────────────
         const appsPage = new Adw.PreferencesPage({
             title:     _('Applications'),
@@ -302,9 +186,6 @@ export default class SmoothShellCornersPreferences extends ExtensionPreferences 
         listGroup.add(whitelistRow);
 
         // Multiline text editor for the blacklist
-        const blacklistRow = new Adw.ActionRow({
-            title: _('Exception list'),
-        });
         const scrolled = new Gtk.ScrolledWindow({
             vscrollbar_policy: Gtk.PolicyType.AUTOMATIC,
             min_content_height: 120,
@@ -351,6 +232,13 @@ export default class SmoothShellCornersPreferences extends ExtensionPreferences 
         listExpander.add_row(wrap);
         listGroup.add(listExpander);
 
+}
+
+export function addAboutPreferences(
+    win: Adw.PreferencesWindow,
+    metadata: Record<string, any>,
+    settings: Gio.Settings,
+): void {
         // ── Page 4: About ────────────────────────────────────────────────────
         const aboutPage = new Adw.PreferencesPage({
             title:     _('About'),
@@ -361,9 +249,9 @@ export default class SmoothShellCornersPreferences extends ExtensionPreferences 
         const aboutGroup = new Adw.PreferencesGroup();
         aboutPage.add(aboutGroup);
 
-        const nameRow = new Adw.ActionRow({ title: this.metadata.name });
+        const nameRow = new Adw.ActionRow({ title: metadata.name });
         nameRow.add_suffix(new Gtk.Label({
-            label:  this.metadata['version-name'] ?? '1.0',
+            label:  metadata['version-name'] ?? '1.0',
             xalign: 1,
             valign: Gtk.Align.CENTER,
         }));
@@ -371,13 +259,13 @@ export default class SmoothShellCornersPreferences extends ExtensionPreferences 
 
         const srcRow = new Adw.ActionRow({
             title:    _('Source code'),
-            subtitle: this.metadata.url ?? '',
+            subtitle: metadata.url ?? '',
             activatable: true,
         });
         srcRow.add_suffix(new Gtk.Image({ icon_name: 'go-next-symbolic' }));
         srcRow.connect('activated', () => {
-            const url = this.metadata.url;
-            if (url) Gtk.show_uri(win, url, GLib.get_current_time());
+            const url = metadata.url;
+            if (url) Gtk.show_uri(win, url, Gdk.CURRENT_TIME);
         });
         aboutGroup.add(srcRow);
 
@@ -390,5 +278,4 @@ export default class SmoothShellCornersPreferences extends ExtensionPreferences 
         });
         bindBool(settings, 'debug-mode', debugRow);
         debugGroup.add(debugRow);
-    }
 }

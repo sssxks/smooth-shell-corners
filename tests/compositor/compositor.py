@@ -2,7 +2,7 @@
 # requires-python = ">=3.13,<3.14"
 # dependencies = ["pillow==12.1.1", "numpy==2.4.2"]
 # ///
-"""Bazzite / GNOME 50: uv run tests/compositor.py (isolated headless Shell).
+"""Bazzite / GNOME 50: uv run tests/compositor/compositor.py.
 
 Compare actual composited text, not just the fragment shader. All settings,
 apps, screenshots and the unsafe Eval endpoint live on a private test bus.
@@ -19,7 +19,7 @@ import time
 import numpy as np
 from PIL import Image
 
-repo = Path(__file__).resolve().parent.parent
+repo = Path(__file__).resolve().parents[2]
 results = []
 
 with tempfile.TemporaryDirectory(prefix="ssc-compositor-") as temporary:
@@ -47,7 +47,7 @@ import Cogl from 'gi://Cogl';
 import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import {{RoundedCornersEffect}} from '{repo.as_uri()}/effect.js';
+import {{RoundedCornersEffect}} from '{repo.as_uri()}/dist/effects/rounded-corners.js';
 const Pass = GObject.registerClass(class SSCProbePass extends Shell.GLSLEffect {{
     vfunc_build_pipeline() {{ this.add_glsl_snippet(Cogl.SnippetHook.FRAGMENT, '', '', false); }}
 }});
@@ -85,13 +85,13 @@ export default class Probe {{
         env["DBUS_SESSION_BUS_ADDRESS"] = shell.stdout.readline().strip()
         assert env["DBUS_SESSION_BUS_ADDRESS"], "Private bus failed to start"
         run(["gdbus", "wait", "--session", "--timeout", "20", "org.example.SSCProbe"], timeout=25)
-        app = subprocess.Popen(["gjs", "-m", str(repo / "tests/compositor-app.js")], env=env,
+        app = subprocess.Popen(["gjs", "-m", str(repo / "tests/fixtures/compositor-app.js")], env=env,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         run(["gdbus", "wait", "--session", "--timeout", "10", "org.example.SSCSharpness"], timeout=15)
         time.sleep(0.5)  # Let the first Wayland configure/paint finish.
 
         def control(command, argument=""):
-            return json.loads(run(["gjs", "-m", str(repo / "tests/compositor-driver.js"), command, str(argument)]))
+            return json.loads(run(["gjs", "-m", str(repo / "tests/compositor/compositor-driver.js"), command, str(argument)]))
 
         def evaluate(code):
             return control("eval", code)
@@ -166,7 +166,9 @@ export default class Probe {{
         compare("return-from-clone", capture("return-baseline"), returned, 1.5, 101, 101, 600, 400)
 
         (repo / "dist").mkdir(exist_ok=True)
-        (repo / "dist/sharpness-results.json").write_text(json.dumps(results, indent=2) + "\n")
+        artifacts = repo / "tests/artifacts"
+        artifacts.mkdir(exist_ok=True)
+        (artifacts / "sharpness-results.json").write_text(json.dumps(results, indent=2) + "\n")
     except Exception:
         print((root / "cache/shell.log").read_text()[-10000:])
         raise

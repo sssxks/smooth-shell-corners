@@ -4,7 +4,8 @@ import vm from 'node:vm';
 import {test} from 'node:test';
 
 // Run the real uniform setup without requiring a running GNOME Shell.
-const source = readFileSync(new URL('../effect.js', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../../dist/effects/rounded-corners.js', import.meta.url), 'utf8')
+    .replace(/^import \{[\s\S]*?\} from '\.\/shaders\.js';$/m, '')
     .replace(/^import .*;$/gm, '').replaceAll('export const ', 'const ');
 class EffectBase {
     actor = {
@@ -24,9 +25,14 @@ const Cogl = {
     Snippet: {new: () => ({set_replace() {}})},
     SnippetHook: {}, PipelineFilter: {},
 };
+const FILL_DECLARATIONS = '';
+const FILL_CODE = '';
+const ROUNDED_DECLARATIONS = '';
+const ROUNDED_CODE = '';
 const Effect = vm.runInNewContext(`${source}\nRoundedCornersEffect`, {
     GObject: {registerClass: (_meta, cls) => cls}, Shell: {GLSLEffect: EffectBase},
-    Clutter: {Effect: EffectBase}, Cogl,
+    Clutter: {Effect: EffectBase}, Cogl, Graphene: {},
+    FILL_DECLARATIONS, FILL_CODE, ROUNDED_DECLARATIONS, ROUNDED_CODE,
 });
 const cfg = {
     padding: {left: 2, top: 2, right: 2, bottom: 2},

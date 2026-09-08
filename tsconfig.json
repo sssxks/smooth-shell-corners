@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist",
+    "rootDir": "src",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "strict": true,
+    "strictNullChecks": false,
+    "noImplicitAny": false,
+    "useUnknownInCatchVariables": false,
+    "skipLibCheck": true,
+    "sourceMap": false,
+    "noEmitOnError": true
+  },
+  "include": ["ambient.d.ts", "src/**/*.ts"]
+}

@@ -27,7 +27,10 @@ error()   { echo -e "${RED}[✗]${NC} $*" >&2; exit 1; }
 
 # ── Uninstall path ────────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--uninstall" ]]; then
-    gjs -m "${SCRIPT_DIR}/restore-native-radius.js"
+    if [[ ! -f "${SCRIPT_DIR}/dist/restore-native-radius.js" ]]; then
+        npm --prefix "${SCRIPT_DIR}" run build
+    fi
+    gjs -m "${SCRIPT_DIR}/dist/restore-native-radius.js"
     if [[ -d "${INSTALL_DIR}" ]]; then
         rm -rf "${INSTALL_DIR}"
         info "Extension removed from ${INSTALL_DIR}"
@@ -63,40 +66,21 @@ if command -v gnome-shell &>/dev/null; then
     fi
 fi
 
-# ── Compile GSettings schema ──────────────────────────────────────────────────
-SCHEMA_DIR="${SCRIPT_DIR}/schemas"
-info "Compiling GSettings schema…"
-glib-compile-schemas "${SCHEMA_DIR}"
-info "  → ${SCHEMA_DIR}/gschemas.compiled"
+# ── Build the installable extension tree ──────────────────────────────────────
+if ! command -v npm &>/dev/null; then
+    error "npm not found. Install Node.js and npm to build the TypeScript sources."
+fi
+
+info "Building TypeScript sources…"
+npm --prefix "${SCRIPT_DIR}" run build
+BUILD_DIR="${SCRIPT_DIR}/dist"
 
 # ── Create installation directory ────────────────────────────────────────────
-mkdir -p "${INSTALL_DIR}/schemas"
+mkdir -p "${INSTALL_DIR}"
 
 # ── Copy extension files ──────────────────────────────────────────────────────
-EXTENSION_FILES=(
-    metadata.json
-    extension.js
-    effect.js
-    native-radius.js
-    restore-native-radius.js
-    prefs.js
-    stylesheet.css
-)
-
-for f in "${EXTENSION_FILES[@]}"; do
-    src="${SCRIPT_DIR}/${f}"
-    if [[ -f "${src}" ]]; then
-        cp "${src}" "${INSTALL_DIR}/${f}"
-        info "  Copied ${f}"
-    else
-        error "Required file not found: ${f}"
-    fi
-done
-
-# ── Copy schema ───────────────────────────────────────────────────────────────
-cp "${SCHEMA_DIR}/"*.xml          "${INSTALL_DIR}/schemas/"
-cp "${SCHEMA_DIR}/gschemas.compiled" "${INSTALL_DIR}/schemas/"
-info "  Copied schemas/"
+cp -r "${BUILD_DIR}/." "${INSTALL_DIR}/"
+info "  Copied dist/"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""

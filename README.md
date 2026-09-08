@@ -319,7 +319,7 @@ Then [open a bug report](#reporting-bugs) with the full log.
 **Distribution & version:**
 **Display server:**  Wayland / X11
 **Monitor scale:**  100% / 125% / 150% / other
-**Extension version:**  (from metadata.json or the Extensions app)
+**Extension version:**  (from resources/metadata.json or the Extensions app)
 
 **Steps to reproduce:**
 1.
@@ -377,13 +377,19 @@ where `e = smoothing × 10 + 2` (2 = circle, 12 = squircle).
 ## Development checks
 
 ```bash
-node --test tests/*.test.mjs
-gjs -m tests/native-radius.js
-gjs -m tests/native-radius-render.js
-uv run tests/render.py
-timeout 120s uv run tests/compositor.py
-glib-compile-schemas --strict --dry-run schemas
+just check
+gjs -m tests/unit/native-radius.test.js
+gjs -m tests/compositor/native-radius-render.js
+uv run tests/unit/render.py
+timeout 120s uv run tests/compositor/compositor.py
+glib-compile-schemas --strict --dry-run resources/schemas
 ```
+
+TypeScript source lives under `src/`, static extension resources under
+`resources/`, and `dist/` is generated as the complete installable extension.
+The root `extension.js` and `prefs.js` required by GNOME are emitted from small
+entry points; window lifecycle, filtering, geometry, shadows, effects, settings,
+and preference pages are maintained in separate modules.
 
 The rendering test compiles the actual shader snippets in a headless EGL context
 and checks a synthetic border, content preservation, opacity, and corner clipping.
@@ -399,7 +405,7 @@ headless Shell, private session bus and GTK text fixture with temporary settings
 it does not change the running desktop. It compares interior screenshot pixels
 with the effect disabled at 100%, 125%, 150% and 200%, including fractional pixel
 positions, content updates, opacity and an overview-style clone. Results are
-written to `dist/sharpness-results.json`. This renderer has not yet been verified
+written to `tests/artifacts/sharpness-results.json`. This renderer has not yet been verified
 on older Shell releases or with mixed-monitor setups and other window effects.
 
 ## Credits

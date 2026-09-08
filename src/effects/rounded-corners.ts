@@ -1,187 +1,15 @@
-/**
- * effect.js – GLSL Clutter effects for Smooth Shell Corners
- *
- * The window effect owns a pixel-aligned framebuffer (see below). The shadow
- * still uses Shell.GLSLEffect, whose GNOME 50 (Mutter 18) lifecycle is:
- *
- *   In shell_glsl_effect_constructed(), Mutter does:
- *     1. klass->base_pipeline = cogl_pipeline_new(ctx)
- *     2. klass->build_pipeline(self)   ← vfunc_build_pipeline runs HERE
- *     3. priv->pipeline = cogl_pipeline_copy(klass->base_pipeline)
- *
- *   Therefore:
- *     - add_glsl_snippet() is ONLY valid inside vfunc_build_pipeline()
- *       (it operates on klass->base_pipeline which exists at that point).
- *     - get_uniform_location() must NOT be called in vfunc_build_pipeline()
- *       because it uses priv->pipeline which is still NULL at that point.
- *     - get_uniform_location() and set_uniform_float() are safe AFTER the
- *       constructor completes (priv->pipeline is set in step 3).
- *     - build_pipeline runs once per GType class, not per instance.
- *
- * Based on:
- *   https://gitlab.gnome.org/GNOME/gnome-shell/-/blob/50.0/src/shell-glsl-effect.c
- *   https://github.com/flexagoon/rounded-window-corners
- */
-
 import Cogl from 'gi://Cogl';
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import Graphene from 'gi://Graphene';
-import Shell from 'gi://Shell';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GLSL – Rounded corners shader
-// ─────────────────────────────────────────────────────────────────────────────
+import {
+    FILL_CODE,
+    FILL_DECLARATIONS,
+    ROUNDED_CODE,
+    ROUNDED_DECLARATIONS,
+} from './shaders.js';
 
-// Remap the texture lookup before Cogl applies actor opacity. Sampling in the
-// final fragment hook would bypass that modulation during window animations.
-const FILL_DECLARATIONS = /* glsl */`
-uniform float fillPadding;
-uniform vec4 sampleBounds;
-`;
-
-const FILL_CODE = /* glsl */`
-    vec2 uv = cogl_tex_coord.st;
-    if (fillPadding > 0.5)
-        uv = clamp(uv, sampleBounds.xy, sampleBounds.zw);
-    cogl_texel = texture2D(cogl_sampler, uv);
-`;
-
-const ROUNDED_DECLARATIONS = /* glsl */`
-uniform vec4  bounds;
-uniform float clipRadius;
-uniform float borderWidth;
-uniform vec4  borderColor;
-uniform vec4  borderedAreaBounds;
-uniform float borderedAreaClipRadius;
-uniform float exponent;
-uniform vec2  pixelStep;
-uniform vec2  textureOrigin;
-
-float circleBounds(vec2 p, vec2 center, float r) {
-    vec2  d     = p - center;
-    float dist2 = dot(d, d);
-    float outer = r + 0.5;
-    if (dist2 >= outer * outer) return 0.0;
-    float inner = r - 0.5;
-    if (dist2 <= inner * inner) return 1.0;
-    return outer - sqrt(dist2);
-}
-
-float squircleBounds(vec2 p, vec2 center, float r, float e) {
-    vec2  d    = abs(p - center);
-    float dist = pow(pow(d.x, e) + pow(d.y, e), 1.0 / e);
-    return clamp(r - dist + 0.5, 0.0, 1.0);
-}
-
-float getOpacity(vec2 p, vec4 b, float r, float e) {
-    if (p.x < b.x || p.x > b.z || p.y < b.y || p.y > b.w) return 0.0;
-    float cl = b.x + r, cr = b.z - r;
-    float ct = b.y + r, cb = b.w - r;
-    vec2 c;
-    if      (p.x < cl) c.x = cl;
-    else if (p.x > cr) c.x = cr;
-    else               return 1.0;
-    if      (p.y < ct) c.y = ct;
-    else if (p.y > cb) c.y = cb;
-    else               return 1.0;
-    if (e <= 2.0)
-        return circleBounds(p, c, r);
-    else
-        return squircleBounds(p, c, r, e);
-}
-`;
-
-const ROUNDED_CODE = /* glsl */`
-    vec2  p = cogl_tex_coord_in[0].xy / pixelStep + textureOrigin;
-    float a = getOpacity(p, bounds, clipRadius, exponent);
-
-    if (borderWidth > 0.9 || borderWidth < -0.9) {
-        float ba = getOpacity(p, borderedAreaBounds, borderedAreaClipRadius, exponent);
-        if (borderWidth > 0.0) {
-            cogl_color_out *= a;
-            float edgeAlpha = clamp(abs(a - ba), 0.0, 1.0);
-            cogl_color_out = mix(cogl_color_out,
-                                 vec4(borderColor.rgb, 1.0),
-                                 edgeAlpha * borderColor.a);
-        } else {
-            vec4 borderRect = vec4(borderColor.rgb, 1.0) * ba * borderColor.a;
-            cogl_color_out  = mix(borderRect, cogl_color_out, a);
-        }
-    } else {
-        cogl_color_out *= a;
-    }
-`;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GLSL – Clip shadow shader
-//
-// Uses the same squircle formula as RoundedCornersEffect so the shadow is
-// clipped with pixel-perfect precision along the rounded corners.
-//
-// Uniforms (all in shadow-actor pixel coordinates):
-//   shadowBounds  – [x1, y1, x2, y2] of the WINDOW content area
-//   shadowRadius  – squircle corner radius (matches RoundedCornersEffect)
-//   shadowExp     – squircle exponent (matches RoundedCornersEffect)
-//   shadowStep    – [1/actorW, 1/actorH] for the shadow actor
-// ─────────────────────────────────────────────────────────────────────────────
-
-const SHADOW_DECLARATIONS = /* glsl */`
-uniform vec4  shadowBounds;
-uniform float shadowRadius;
-uniform float shadowExp;
-uniform vec2  shadowStep;
-
-float shadowCircleBounds(vec2 p, vec2 center, float r) {
-    vec2  d     = p - center;
-    float dist2 = dot(d, d);
-    float outer = r + 0.5;
-    if (dist2 >= outer * outer) return 0.0;
-    float inner = r - 0.5;
-    if (dist2 <= inner * inner) return 1.0;
-    return outer - sqrt(dist2);
-}
-
-float shadowSquircleBounds(vec2 p, vec2 center, float r, float e) {
-    vec2  d    = abs(p - center);
-    float dist = pow(pow(d.x, e) + pow(d.y, e), 1.0 / e);
-    return clamp(r - dist + 0.5, 0.0, 1.0);
-}
-
-float shadowGetOpacity(vec2 p, vec4 b, float r, float e) {
-    if (p.x < b.x || p.x > b.z || p.y < b.y || p.y > b.w) return 0.0;
-    float cl = b.x + r, cr = b.z - r;
-    float ct = b.y + r, cb = b.w - r;
-    vec2 c;
-    if      (p.x < cl) c.x = cl;
-    else if (p.x > cr) c.x = cr;
-    else               return 1.0;
-    if      (p.y < ct) c.y = ct;
-    else if (p.y > cb) c.y = cb;
-    else               return 1.0;
-    if (e <= 2.0)
-        return shadowCircleBounds(p, c, r);
-    else
-        return shadowSquircleBounds(p, c, r, e);
-}
-`;
-
-const SHADOW_CODE = /* glsl */`
-    vec2 p = cogl_tex_coord_in[0].xy / shadowStep;
-    // opacity = 1 inside the squircle, 0 outside, anti-aliased at edges
-    float opacity = shadowGetOpacity(p, shadowBounds, shadowRadius, shadowExp);
-    // Erase the shadow where the window content would be (inside the squircle)
-    cogl_color_out *= (1.0 - opacity);
-`;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RoundedCornersEffect
-//
-// Shell.GLSLEffect rounds the resource scale up to an integer before rendering
-// offscreen. At 150%, a native 1.5x window gets resampled to 2x and back to 1.5x.
-// Own the framebuffer here to keep the intermediate image at the monitor scale.
-// The shadow below can still use Shell.GLSLEffect: it contains no sharp content.
-// ─────────────────────────────────────────────────────────────────────────────
 export const RoundedCornersEffect = GObject.registerClass(
     { GTypeName: 'SSCRoundedCornersEffect' },
     class RoundedCornersEffect extends Clutter.Effect {
@@ -195,6 +23,8 @@ export const RoundedCornersEffect = GObject.registerClass(
         _originY = 0;
         _stage = null;
         _purgeConnection = 0;
+        _sample = [0, 0, 0, 0];
+        _windowBounds = {x1: 0, y1: 0, x2: 0, y2: 0};
 
         vfunc_set_actor(actor) {
             if (this._purgeConnection) this._stage.disconnect(this._purgeConnection);
@@ -443,67 +273,3 @@ export const RoundedCornersEffect = GObject.registerClass(
     },
 );
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ClipShadowEffect
-//
-// Clips the custom CSS shadow so it is transparent exactly where the window
-// content is — following the squircle shape instead of a plain rectangle.
-// ─────────────────────────────────────────────────────────────────────────────
-export const ClipShadowEffect = GObject.registerClass(
-    { GTypeName: 'SSCClipShadowEffect' },
-    class ClipShadowEffect extends Shell.GLSLEffect {
-
-        _u = null;
-
-        vfunc_build_pipeline() {
-            this.add_glsl_snippet(
-                Cogl.SnippetHook.FRAGMENT,
-                SHADOW_DECLARATIONS,
-                SHADOW_CODE,
-                false,
-            );
-            // Do NOT call get_uniform_location() or set_uniform_float() here.
-        }
-
-        _ensureUniforms() {
-            if (this._u) return;
-            this._u = {
-                bounds:  this.get_uniform_location('shadowBounds'),
-                radius:  this.get_uniform_location('shadowRadius'),
-                exp:     this.get_uniform_location('shadowExp'),
-                step:    this.get_uniform_location('shadowStep'),
-            };
-        }
-
-        /**
-         * Update the squircle clip for the shadow actor.
-         * @param {number[]} bounds  – [x1, y1, x2, y2] of the window content area
-         *                             in shadow-actor pixel coordinates
-         * @param {number}   radius  – squircle corner radius (same as RoundedCornersEffect)
-         * @param {number}   exp     – squircle exponent (same as RoundedCornersEffect)
-         * @param {number}   sw      – shadow actor width  (0 = read from actor)
-         * @param {number}   sh      – shadow actor height (0 = read from actor)
-         *
-         * sw/sh may be passed explicitly to avoid a layout-timing race:
-         * BindConstraints are resolved on the next Clutter layout pass, so
-         * this.actor.get_width() can return 0 on the first call (e.g. for
-         * Qt/OpenGL X11 windows that defer applyEffectTo until notify::size).
-         */
-        setClip(bounds, radius, exp, sw = 0, sh = 0) {
-            this._ensureUniforms();
-            if (!this._u) return;
-
-            const w = sw > 0 ? sw : this.actor.get_width();
-            const h = sh > 0 ? sh : this.actor.get_height();
-            if (w <= 0 || h <= 0) return;
-
-            const step = [1 / w, 1 / h];
-
-            this.set_uniform_float(this._u.bounds,  4, bounds);
-            this.set_uniform_float(this._u.radius,  1, [radius]);
-            this.set_uniform_float(this._u.exp,     1, [exp]);
-            this.set_uniform_float(this._u.step,    2, step);
-            this.queue_repaint();
-        }
-    },
-);

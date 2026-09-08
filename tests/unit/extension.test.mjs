@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {test} from 'node:test';
 
-const source = readFileSync(new URL('../extension.js', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../../dist/shell/window-manager.js', import.meta.url), 'utf8')
     .replace(/^import .*;$/gm, '').replace('export default class', 'class');
 
 function setup(failEnable = false) {
@@ -27,9 +27,9 @@ function setup(failEnable = false) {
         enableEffect = () => {};
         disableEffect = () => {};
         getAppType = () => 'LibAdwaita';
-        getWindowIdentifiers = () => ['org.example.App'];
-        ({instance: new SmoothShellCornersExtension(),
-          skip: () => shouldSkip({windowType: 0})});
+        shouldSkipWindow = () => _settings.get_boolean('skip-libadwaita-app') &&
+            !_nativeRadiusRemoved;
+        ({instance: new SmoothShellCornersExtension(), skip: () => shouldSkip({windowType: 0})});
     `, {
         Extension: class { getSettings() { return settings; } },
         Meta: {WindowType: {NORMAL: 0}},

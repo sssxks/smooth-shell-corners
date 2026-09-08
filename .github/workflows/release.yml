@@ -17,23 +17,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
       - name: Build extension zip
         run: |
-          UUID="rounded-windows@marcosgt.github.io"
-          mkdir -p dist
-          glib-compile-schemas schemas
-          zip -r "dist/${UUID}.shell-extension.zip" \
-            extension.js \
-            effect.js \
-            prefs.js \
-            metadata.json \
-            stylesheet.css \
-            schemas/
+          npm run build
+          cd dist
+          zip -9r ../smooth-shell-corners@xks.shell-extension.zip .
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.zip
+          files: smooth-shell-corners@xks.shell-extension.zip
           body: |
             ## Instalación
 

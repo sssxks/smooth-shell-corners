@@ -25,26 +25,36 @@
  *   └─ uninitPrefs()
  */
 
-import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
-import Shell from 'gi://Shell';
-import St from 'gi://St';
 
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import { RoundedCornersEffect, ClipShadowEffect } from './effect.js';
-import { setNativeRadiusRemoved } from './native-radius.js';
+import {RoundedCornersEffect} from '../effects/index.js';
+import { setNativeRadiusRemoved } from '../native-radius.js';
+import {readCornerConfig} from '../settings/config.js';
+import {clearWindowFilterCache, shouldSkip as shouldSkipWindow} from './window-filter.js';
+import {connectSignal, disconnectSignals, type SignalConnection} from './connections.js';
+import {
+    computeBounds as computeWindowBounds,
+    getEffect as getWindowEffect,
+    getWindowTexture,
+    targetActor,
+} from './window-geometry.js';
+import {
+    createShadow as createWindowShadow,
+    refreshShadowClip as refreshWindowShadowClip,
+    refreshShadowGeometry,
+    refreshShadowStyle as refreshWindowShadowStyle,
+} from './shadows.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 const ROUNDED_CORNERS_EFFECT = 'ssc-rounded-corners';
-const CLIP_SHADOW_EFFECT      = 'ssc-clip-shadow';
-const SHADOW_PADDING          = 80;   // extra pixels around the shadow actor
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-level state
@@ -61,7 +71,7 @@ const SHADOW_PADDING          = 80;   // extra pixels around the shadow actor
 // ─────────────────────────────────────────────────────────────────────────────
 let _settings       = null;
 let _nativeRadiusRemoved = false;
-let _connections    = [];   // global connections
+const _connections: SignalConnection[] = [];   // global connections
 const _actorMap     = new WeakMap();
 let _mutterSettings = null;
 let _mutterSettingsConn = 0;
@@ -71,46 +81,9 @@ let _settingsTimeoutId = 0;
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings helpers
 // ─────────────────────────────────────────────────────────────────────────────
-function getS(key)   { return _settings.get_value(key).recursiveUnpack(); }
 function getB(key)   { return _settings.get_boolean(key); }
-function getI(key)   { return _settings.get_int(key); }
-function getD(key)   { return _settings.get_double(key); }
 
-/** Build the per-window config object from GSettings. */
-function buildConfig() {
-    return {
-        cornerRadius: getI('corner-radius'),
-        smoothing:    getD('smoothing'),
-        fillPadding:  getB('fill-padding'),
-        padding: {
-            top:    getI('padding-top'),
-            bottom: getI('padding-bottom'),
-            left:   getI('padding-left'),
-            right:  getI('padding-right'),
-        },
-        borderWidth: getI('border-width'),
-        borderColor: [
-            getD('border-red'),
-            getD('border-green'),
-            getD('border-blue'),
-            getD('border-alpha'),
-        ],
-        keepRoundedMaximized:  getB('keep-rounded-maximized'),
-        keepRoundedFullscreen: getB('keep-rounded-fullscreen'),
-    };
-}
-
-/** Return the shadow settings for the focused or unfocused state. */
-function shadowConfig(focused) {
-    const prefix = focused ? 'focused-shadow' : 'unfocused-shadow';
-    return {
-        opacity:         getI(`${prefix}-opacity`),
-        blur:            getI(`${prefix}-blur`),
-        spread:          getI(`${prefix}-spread`),
-        xOffset:         getI(`${prefix}-x-offset`),
-        yOffset:         getI(`${prefix}-y-offset`),
-    };
-}
+function buildConfig() { return readCornerConfig(_settings); }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Logging
@@ -123,192 +96,16 @@ function logDbg(msg) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Application type detection  (libadwaita / libhandy)
 // ─────────────────────────────────────────────────────────────────────────────
-const _appTypeCache = new Map();   // pid ↦ 'LibAdwaita' | 'LibHandy' | 'Other'
-const ROUNDABLE_WINDOW_TYPES = [
-    Meta.WindowType.NORMAL,
-    Meta.WindowType.DIALOG,
-    Meta.WindowType.MODAL_DIALOG,
-    Meta.WindowType.UTILITY,
-    Meta.WindowType.SPLASHSCREEN,
-    Meta.WindowType.TOOLBAR,
-].filter(type => type !== undefined);
-
-function normalizeAppId(value) {
-    if (typeof value !== 'string')
-        return '';
-    return value.trim().replace(/\.desktop$/i, '');
-}
-
-function getWindowIdentifiers(win) {
-    const identifiers = new Set();
-    const add = value => {
-        if (typeof value !== 'string')
-            return;
-
-        const trimmed = value.trim();
-        if (!trimmed)
-            return;
-
-        identifiers.add(trimmed);
-
-        const normalized = normalizeAppId(trimmed);
-        if (normalized)
-            identifiers.add(normalized);
-    };
-
-    try {
-        add(win.get_wm_class_instance?.());
-        add(win.get_wm_class?.());
-    } catch (_) {}
-
-    try {
-        add(win.gtkApplicationId ?? win.get_gtk_application_id?.());
-    } catch (_) {}
-
-    try {
-        add(win.get_sandboxed_app_id?.());
-    } catch (_) {}
-
-    try {
-        const tracker = Shell.WindowTracker.get_default();
-        const app = tracker?.get_window_app(win) ?? null;
-        add(app?.get_id?.());
-        add(app?.get_name?.());
-    } catch (_) {}
-
-    return [...identifiers];
-}
-
-function isListedWindow(identifiers, list) {
-    const lookup = new Set(
-        identifiers
-            .map(id => normalizeAppId(id))
-            .filter(Boolean),
-    );
-
-    for (const item of list) {
-        const normalized = normalizeAppId(item);
-        if (normalized && lookup.has(normalized))
-            return true;
-    }
-
-    return false;
-}
-
-function getAppType(win) {
-    const pid = win.get_pid();
-
-    // Prevent infinite growth of the PID cache
-    if (_appTypeCache.size > 200)
-        _appTypeCache.clear();
-
-    if (_appTypeCache.has(pid))
-        return _appTypeCache.get(pid);
-
-    let type = 'Other';
-    try {
-        const decoder = new TextDecoder();
-        const [, bytes] = GLib.file_get_contents(`/proc/${pid}/maps`);
-        const maps = decoder.decode(bytes);
-        if (maps.includes('libadwaita-1.so'))
-            type = 'LibAdwaita';
-        else if (maps.includes('libhandy-1.so'))
-            type = 'LibHandy';
-    } catch (_) {
-        // /proc may not be readable for all pids – treat as 'Other'
-    }
-
-    _appTypeCache.set(pid, type);
-    return type;
-}
-
-/** True when this window should NOT get rounded corners. */
 function shouldSkip(win) {
-    const identifiers = getWindowIdentifiers(win);
-    if (identifiers.some(id => ['com.rastersoft.ding', 'ding'].includes(normalizeAppId(id))))
-        return true;
-
-    const windowType = win.windowType ?? win.get_window_type?.();
-    if (!ROUNDABLE_WINDOW_TYPES.includes(windowType))
-        return true;
-
-    // Blacklist / whitelist logic:
-    //   Normal mode (whitelist-mode = false):
-    //     listed windows are EXCLUDED (blacklist)
-    //   Whitelist mode (whitelist-mode = true):
-    //     only listed windows are INCLUDED, all others are excluded
-    const blacklist     = getS('blacklist');
-    const whitelistMode = getB('whitelist-mode');
-    const isListed      = isListedWindow(identifiers, blacklist);
-
-    if (whitelistMode && !isListed)
-        return true;   // whitelist mode: skip apps not in the list
-    if (!whitelistMode && isListed)
-        return true;   // blacklist mode: skip apps in the list
-
-    // Optionally skip libadwaita / libhandy apps (unless explicitly listed)
-    const appType = getAppType(win);
-    if (!_nativeRadiusRemoved && getB('skip-libadwaita-app') && appType === 'LibAdwaita' && !isListed)
-        return true;
-    if (getB('skip-libhandy-app')   && appType === 'LibHandy'   && !isListed)
-        return true;
-
-    // Skip maximised / fullscreen windows unless the user explicitly wants
-    // rounded corners in those states
-    const cfg = buildConfig();
-    const isMax  = win.maximizedHorizontally || win.maximizedVertically;
-    const isFull = win.fullscreen;
-
-    if (isMax  && !cfg.keepRoundedMaximized)  return true;
-    if (isFull && !cfg.keepRoundedFullscreen) return true;
-
-    return false;
+    return shouldSkipWindow(win, _settings, _nativeRadiusRemoved);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Actor helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function findTextureActor(actor) {
-    if (!actor)
-        return null;
-
-    if (actor.get_texture?.())
-        return actor;
-
-    let child = actor.get_first_child?.() ?? null;
-    while (child) {
-        const textured = findTextureActor(child);
-        if (textured)
-            return textured;
-
-        child = child.get_next_sibling?.() ?? null;
-    }
-
-    return null;
-}
-
-/**
- * Get the Clutter.Actor to which the rounded-corners effect should be applied.
- *
- * On GNOME 50 both Wayland-native and X11/XWayland windows render through a
- * texture-bearing descendant actor. Applying the effect to that actor keeps
- * the shader aligned with the actual painted content instead of the outer
- * WindowActor container.
- */
-function targetActor(actor) {
-    return findTextureActor(actor) ?? actor;
-}
-
-function getWindowTexture(actor) {
-    const target = targetActor(actor);
-    return target?.get_texture?.() ?? actor?.get_texture?.() ?? null;
-}
-
-/** Get the RoundedCornersEffect attached to a window actor (or null). */
 function getEffect(actor) {
-    const target = targetActor(actor);
-    return target ? target.get_effect(ROUNDED_CORNERS_EFFECT) : null;
+    return getWindowEffect(actor, ROUNDED_CORNERS_EFFECT);
 }
 
 /**
@@ -332,7 +129,8 @@ function isFractionalScalingEnabled() {
         }
 
         const features = _mutterSettings.get_strv('experimental-features');
-        const isWayland = !Meta.is_wayland_compositor || Meta.is_wayland_compositor();
+        const isWaylandCompositor = (Meta as any).is_wayland_compositor;
+        const isWayland = !isWaylandCompositor || isWaylandCompositor();
         _fractionalScaling = isWayland && features.includes('scale-monitor-framebuffer');
     } catch (_) {
         _fractionalScaling = false;
@@ -358,220 +156,24 @@ function scaleFactor(win) {
  *
  * Returns [dx, dy, dw, dh] (all ≤ 0 for the width/height components).
  */
-function contentOffset(win) {
-    const buf   = win.get_buffer_rect();
-    const frame = win.get_frame_rect();
-    return [
-        frame.x - buf.x,
-        frame.y - buf.y,
-        frame.width  - buf.width,
-        frame.height - buf.height,
-    ];
-}
-
-/**
- * Compute the shader bounds (x1, y1, x2, y2) in *target-actor-local* pixel
- * coords.  The target actor is determined by targetActor().
- *
- * The target actor is the texture-bearing descendant returned by targetActor().
- * Its allocation tracks the actual window buffer, so contentOffset() can be
- * applied uniformly for Wayland and X11/XWayland windows.
- */
 function computeBounds(actor, fillPadding = false) {
-    const win = actor.metaWindow;
-    const sc  = scaleFactor(win);
-    const target = targetActor(actor) ?? actor;
-    const targetW = target.width;
-    const targetH = target.height;
-    
-    const [dx, dy, dw, dh] = contentOffset(win);
-    // The frame area starts at (dx, dy) inside the buffer actor, because dx/dy
-    // is the difference between the visible frame and the underlying buffer.
-    let x1 = dx;
-    let y1 = dy;
-    let x2 = dx + targetW + dw;
-    let y2 = dy + targetH + dh;
-
-    // Apply a 1px anti-aliasing inset if the window has no buffer padding
-    // in that direction to avoid drawing semitransparent texture edge pixels.
-    // Filled edges replace these texture-edge pixels and must reach the frame.
-    if (!fillPadding) {
-        if (x1 === 0) x1 += sc;
-        if (y1 === 0) y1 += sc;
-        if (x2 === targetW) x2 -= sc;
-        if (y2 === targetH) y2 -= sc;
-    }
-
-    return { x1, y1, x2, y2 };
+    return computeWindowBounds(actor, scaleFactor(actor.metaWindow), fillPadding);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shadow helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Build the CSS box-shadow string from a shadow config object. */
-function boxShadowCss(sc, scale) {
-    const alpha  = (sc.opacity / 255).toFixed(3);
-    const blur   = (sc.blur   * scale).toFixed(1);
-    const spread = (sc.spread * scale).toFixed(1);
-    const x      = (sc.xOffset * scale).toFixed(1);
-    const y      = (sc.yOffset * scale).toFixed(1);
-    return `box-shadow: ${x}px ${y}px ${blur}px ${spread}px rgba(0,0,0,${alpha})`;
-}
-
-/** Create and insert a custom shadow St.Bin below the window actor. */
 function createShadow(actor) {
-    // Outer bin: provides extra padding so the shadow can extend outside
-    const shadow = new St.Bin({
-        name: 'SSC Shadow',
-        style: 'background: transparent;',
-    });
-
-    // Inner bin: the actual CSS shadow is applied here
-    const inner = new St.Bin({ x_expand: true, y_expand: true });
-    inner.add_style_class_name('ssc-shadow');
-    shadow.set_child(inner);
-
-    // Bind x, y, width, height to the window actor (with padding offsets)
-    // The window frame is offset from the actor by `contentOffset` (dx, dy).
-    // We pad the shadow actor by SHADOW_PADDING.
-    const win = actor.metaWindow;
-    const sc = scaleFactor(win);
-    const pad = SHADOW_PADDING * sc;
-
-    const [dx, dy, dw, dh] = contentOffset(win);
-    const offsets = [dx - pad, dy - pad, dw + 2 * pad, dh + 2 * pad];
-
-    for (let i = 0; i < 4; i++) {
-        shadow.add_constraint(new Clutter.BindConstraint({
-            source:     actor,
-            coordinate: i,
-            offset:     offsets[i],
-        }));
-    }
-
-    // Clip-shadow effect prevents shadow from showing inside the window
-    shadow.add_effect_with_name(CLIP_SHADOW_EFFECT, new ClipShadowEffect());
-
-    global.windowGroup.insert_child_below(shadow, actor);
-
-    refreshShadowStyle(actor, shadow);
-    return shadow;
+    return createWindowShadow(actor, _settings, scaleFactor(actor.metaWindow));
 }
 
-/** Update the CSS style of an existing shadow actor. */
 function refreshShadowStyle(actor, shadowActor) {
-    if (!shadowActor) return;
-
-    const win        = actor.metaWindow;
-    const sc         = scaleFactor(win);
-    const origScale  = St.ThemeContext.get_for_stage(global.stage).scale_factor;
-    const cssScale   = sc / origScale;
-
-    const pad    = SHADOW_PADDING * cssScale;
-    const cfg    = buildConfig();
-    const scfg   = shadowConfig(win.appears_focused);
-
-    // Compute the CSS border-radius to match the shader's squircle.
-    // The shader uses:  exponent = smoothing*10+2,  radius = outerR * 0.5 * exponent
-    // CSS border-radius only supports circular arcs (exponent=2).
-    // A squircle extends further along diagonals than a circle of the same radius,
-    // so using the shader's radius for the CSS guarantees the transparent background
-    // never shows through the shader's transparent corners.
-    const exponent    = cfg.smoothing * 10 + 2;
-    const shaderR     = cfg.cornerRadius * 0.5 * exponent;
-    const radius      = shaderR * cssScale;
-
-    const inner = shadowActor.get_first_child();
-    if (!inner) return;
-
-    // Hide shadow when maximised/fullscreened (unless keep-shadow-maximized)
-    const isMax  = win.maximizedHorizontally || win.maximizedVertically;
-    const isFull = win.fullscreen;
-    const hide   = (isMax || isFull) && !getB('keep-shadow-maximized');
-
-    shadowActor.style = `padding: ${pad}px;`;
-
-    // Use transparent background — NEVER white.  The box-shadow alone provides
-    // the visual shadow.  A white background would bleed through the shader's
-    // transparent squircle corners because CSS border-radius is circular.
-    inner.style = hide
-        ? 'opacity: 0;'
-        : `background: transparent;
-           border-radius: ${radius}px;
-           ${boxShadowCss(scfg, cssScale)};
-           margin: ${cfg.fillPadding ? 0 : cfg.padding.top    * cssScale}px
-                   ${cfg.fillPadding ? 0 : cfg.padding.right  * cssScale}px
-                   ${cfg.fillPadding ? 0 : cfg.padding.bottom * cssScale}px
-                   ${cfg.fillPadding ? 0 : cfg.padding.left   * cssScale}px;`;
+    refreshWindowShadowStyle(actor, shadowActor, _settings, scaleFactor(actor.metaWindow));
 }
 
-/** Update the ClipShadowEffect bounds for a shadow actor.
- *
- * The clip now uses the same squircle parameters as the RoundedCornersEffect
- * so the shadow is transparent exactly where the rounded corners are, with
- * pixel-perfect anti-aliasing along the curved edge.
- */
 function refreshShadowClip(actor, shadowActor) {
-    if (!shadowActor) return;
-
-    const effect = shadowActor.get_effect(CLIP_SHADOW_EFFECT);
-    if (!effect) return;
-
-    // Window content rect within the shadow actor in pixel coordinates.
-    // Must mirror exactly the same coordinate system used by computeBounds().
-    // The shadow actor is positioned via BindConstraint to the WindowActor,
-    // so all bounds here are expressed in WindowActor coordinates + pad offset.
-    const win = actor.metaWindow;
-    const sc  = scaleFactor(win);
-    const pad = SHADOW_PADDING * sc;
-
-    // Compute shadow actor dimensions directly from the WindowActor rather than
-    // reading shadowActor.width / shadowActor.height.  BindConstraints are
-    // resolved on the next Clutter layout pass, so the shadow actor's allocated
-    // size is still 0 on the very first call — this is the root cause of the
-    // gray-rectangle bug on Qt / OpenGL X11 windows (VirtualBox etc.) that go
-    // through the deferred applyEffectTo path (waiting for notify::size).
-    // createShadow() sets BindConstraint offsets [dx-pad, dy-pad, dw+2*pad,
-    // dh+2*pad], so shadow dimensions = actor.{width,height} + {dw,dh} + 2*pad.
-    const [, , dw, dh] = contentOffset(win);
-    const sw = actor.width  + dw + 2 * pad;
-    const sh = actor.height + dh + 2 * pad;
-    if (sw <= 0 || sh <= 0) return;
-
-    const cfg    = buildConfig();
-    const outerR = cfg.cornerRadius * sc;
-
-    // Use the same exponent / radius formulae as RoundedCornersEffect
-    // so the clip contour is identical to the rounded corners shader.
-    let exponent = cfg.smoothing * 10 + 2;
-    let radius   = outerR * 0.5 * exponent;
-
-    // The shadow actor is positioned via BindConstraint to the WindowActor 
-    // with offset: [dx - pad, dy - pad].
-    // So the window's logical frame (which starts at dx, dy) maps exactly 
-    // to [pad, pad] in the shadow actor's local coordinates.
-    // The width/height of the frame is (actor.width + dw).
-    const rawX1 = pad;
-    const rawY1 = pad;
-    const rawX2 = pad + actor.width  + dw;
-    const rawY2 = pad + actor.height + dh;
-
-    // Account for padding inset (same as RoundedCornersEffect)
-    const bx1 = rawX1 + (cfg.fillPadding ? 0 : cfg.padding.left   * sc);
-    const by1 = rawY1 + (cfg.fillPadding ? 0 : cfg.padding.top    * sc);
-    const bx2 = rawX2 - (cfg.fillPadding ? 0 : cfg.padding.right  * sc);
-    const by2 = rawY2 - (cfg.fillPadding ? 0 : cfg.padding.bottom * sc);
-
-    const maxR = Math.min(bx2 - bx1, by2 - by1) / 2;
-    if (maxR > 0 && radius > maxR) {
-        exponent *= maxR / radius;
-        radius    = maxR;
-    }
-
-    // Pass sw/sh explicitly so the shader step uniform is correct even when
-    // the shadow actor's BindConstraints haven't been resolved yet.
-    effect.setClip([bx1, by1, bx2, by2], radius, exponent, sw, sh);
+    refreshWindowShadowClip(actor, shadowActor, _settings, scaleFactor(actor.metaWindow));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -599,7 +201,7 @@ function onAddEffect(actor) {
     target.add_effect_with_name(ROUNDED_CORNERS_EFFECT, new RoundedCornersEffect());
 
     let shadow = null;
-    let bindings = [];
+    const bindings = [];
 
     if (getB('custom-shadow')) {
         shadow = createShadow(actor);
@@ -705,18 +307,7 @@ function refreshRoundedCorners(actor) {
         refreshShadowStyle(actor, data.shadow);
         refreshShadowClip(actor, data.shadow);
 
-        // Keep BindConstraint offsets in sync with the current window geometry
-        const sc  = scaleFactor(win);
-        const pad = SHADOW_PADDING * sc;
-        const [dx, dy, dw, dh] = contentOffset(win);
-        const newOffsets = [dx - pad, dy - pad, dw + 2 * pad, dh + 2 * pad];
-
-        if (data.shadow) {
-            data.shadow.get_constraints().forEach((c, i) => {
-                if (c instanceof Clutter.BindConstraint)
-                    c.offset = newOffsets[i];
-            });
-        }
+        refreshShadowGeometry(actor, data.shadow, scaleFactor(win));
     }
 }
 
@@ -747,24 +338,11 @@ function onRestacked() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function addConnection(obj, signal, cb) {
-    _connections.push({ object: obj, id: obj.connect(signal, cb) });
-}
-
-function removeConnections(obj) {
-    let i = _connections.length;
-    while (i--) {
-        const c = _connections[i];
-        if (!obj || c.object === obj) {
-            c.object.disconnect(c.id);
-            _connections.splice(i, 1);
-        }
-    }
+    connectSignal(_connections, obj, signal, cb);
 }
 
 function disconnectAll() {
-    for (const c of _connections)
-        c.object.disconnect(c.id);
-    _connections = [];
+    disconnectSignals(_connections);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -826,8 +404,7 @@ function applyEffectTo(actor) {
         // where the window is mapped before its first paint arrives.
         // Wait for the actor's size to change (first paint / resize), then retry.
         // We disconnect before retrying to avoid double-applying the effect.
-        let connId;
-        connId = actor.connect('notify::size', () => {
+        const connId = actor.connect('notify::size', () => {
             actor.disconnect(connId);
             applyEffectTo(actor);
         });
@@ -852,8 +429,7 @@ function applyEffectToWindow(win) {
         return;
     }
 
-    let connId;
-    connId = win.connect('notify::compositor-private', () => {
+    const connId = win.connect('notify::compositor-private', () => {
         const nextActor = win.get_compositor_private?.();
         if (!nextActor)
             return;
@@ -944,7 +520,7 @@ function enableEffect() {
             _settingsTimeoutId = 0;
         }
         _settingsTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
-            _appTypeCache.clear();
+            clearWindowFilterCache();
             refreshAll();
             _settingsTimeoutId = 0;
             return GLib.SOURCE_REMOVE;
@@ -962,7 +538,7 @@ function disableEffect() {
         _settingsTimeoutId = 0;
     }
     
-    _appTypeCache.clear();
+    clearWindowFilterCache();
     if (_mutterSettings && _mutterSettingsConn) {
         _mutterSettings.disconnect(_mutterSettingsConn);
         _mutterSettingsConn = 0;

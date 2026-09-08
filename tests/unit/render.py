@@ -2,17 +2,17 @@
 # requires-python = ">=3.13,<3.14"
 # dependencies = ["moderngl==5.12.0"]
 # ///
-"""Run with uv run tests/render.py; uses headless EGL on Bazzite."""
+"""Run with uv run tests/unit/render.py; uses headless EGL on Bazzite."""
 import re
 from pathlib import Path
 
 import moderngl
 
-source = (Path(__file__).resolve().parent.parent / "effect.js").read_text()
+source = (Path(__file__).resolve().parents[2] / "dist/effects/shaders.js").read_text()
 
 
 def snippet(name):
-    return re.search(rf"const {name} = /\* glsl \*/`(.*?)`;", source, re.S)[1]
+    return re.search(rf"const {name} = /\* glsl \*/\s*`(.*?)`;", source, re.S)[1]
 
 
 ctx = moderngl.create_standalone_context(backend="egl")
