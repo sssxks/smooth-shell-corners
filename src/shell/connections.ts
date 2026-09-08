@@ -1,15 +1,8 @@
-export interface SignalConnection {
-    object: any;
-    id: number;
-}
+import type GObject from 'gi://GObject';
 
-export function connectSignal(
-    connections: SignalConnection[],
-    object: any,
-    signal: string,
-    callback: (...args: any[]) => void,
-): void {
-    connections.push({object, id: object.connect(signal, callback)});
+export interface SignalConnection {
+    object: Pick<GObject.Object, 'disconnect'>;
+    id: number;
 }
 
 export function disconnectSignals(connections: SignalConnection[]): void {

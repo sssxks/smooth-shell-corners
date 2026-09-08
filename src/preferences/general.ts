@@ -233,10 +233,9 @@ export function addApplicationPreferences(win: Adw.PreferencesWindow, settings: 
         listGroup.add(listExpander);
 
 }
-
 export function addAboutPreferences(
     win: Adw.PreferencesWindow,
-    metadata: Record<string, any>,
+    metadata: {name: string; url?: string; 'version-name'?: string},
     settings: Gio.Settings,
 ): void {
         // ── Page 4: About ────────────────────────────────────────────────────

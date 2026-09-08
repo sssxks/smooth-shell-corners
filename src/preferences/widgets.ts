@@ -1,5 +1,6 @@
 import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
+import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
 export function bindAdjustmentInt(
@@ -32,7 +33,7 @@ export function bindAdjustmentDouble(
     });
 }
 
-export function bindBoolean(settings: Gio.Settings, key: string, widget: any): void {
+export function bindBoolean(settings: Gio.Settings, key: string, widget: GObject.Object): void {
     settings.bind(key, widget, 'active', Gio.SettingsBindFlags.DEFAULT);
 }
 

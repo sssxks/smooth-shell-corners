@@ -5,7 +5,8 @@ import Shell from 'gi://Shell';
 
 import {readCornerConfig} from '../settings/config.js';
 
-const appTypeCache = new Map();
+type AppType = 'Other' | 'LibAdwaita' | 'LibHandy';
+const appTypeCache = new Map<number, AppType>();
 
 export function clearWindowFilterCache(): void {
     appTypeCache.clear();
@@ -25,7 +26,7 @@ export function normalizeAppId(value: unknown): string {
     return value.trim().replace(/\.desktop$/i, '');
 }
 
-export function getWindowIdentifiers(win: any): string[] {
+export function getWindowIdentifiers(win: Meta.Window): string[] {
     const identifiers = new Set<string>();
     const add = (value: unknown) => {
         if (typeof value !== 'string')
@@ -44,7 +45,7 @@ export function getWindowIdentifiers(win: any): string[] {
         add(win.get_wm_class?.());
     } catch (_) {}
     try {
-        add(win.gtkApplicationId ?? win.get_gtk_application_id?.());
+        add(win.gtkApplicationId);
     } catch (_) {}
     try {
         add(win.get_sandboxed_app_id?.());
@@ -67,14 +68,14 @@ export function isListedWindow(identifiers: string[], list: string[]): boolean {
     });
 }
 
-function getAppType(win: any): string {
+function getAppType(win: Meta.Window): AppType {
     const pid = win.get_pid();
     if (appTypeCache.size > 200)
         appTypeCache.clear();
-    if (appTypeCache.has(pid))
-        return appTypeCache.get(pid);
+    const cached = appTypeCache.get(pid);
+    if (cached) return cached;
 
-    let type = 'Other';
+    let type: AppType = 'Other';
     try {
         const decoder = new TextDecoder();
         const [, bytes] = GLib.file_get_contents(`/proc/${pid}/maps`);
@@ -90,7 +91,7 @@ function getAppType(win: any): string {
 }
 
 export function shouldSkip(
-    win: any,
+    win: Meta.Window,
     settings: Gio.Settings,
     nativeRadiusRemoved: boolean,
 ): boolean {
@@ -98,7 +99,7 @@ export function shouldSkip(
     if (identifiers.some(id => ['com.rastersoft.ding', 'ding'].includes(normalizeAppId(id))))
         return true;
 
-    const windowType = win.windowType ?? win.get_window_type?.();
+    const windowType = win.windowType;
     if (!ROUNDABLE_WINDOW_TYPES.includes(windowType))
         return true;
 

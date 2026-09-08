@@ -9,7 +9,7 @@ const END = '/* END Smooth Shell Corners native radius */\n';
 // is also used by apps for unrelated styling such as focus rings.
 export const NATIVE_RADIUS_CSS = 'window.csd { border-radius: 0; }\n';
 
-export function updateCss(css, enabled) {
+export function updateCss(css: string, enabled: boolean): string {
     const start = css.indexOf(BEGIN);
     const end = css.indexOf(END);
     if (start !== -1 || end !== -1) {
@@ -33,7 +33,7 @@ export function nativeCssFiles(
         entries = flatpaks.enumerate_children('standard::name,standard::type',
             Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
     } catch (error) {
-        if (error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND)) return paths;
+        if (error instanceof GLib.Error && error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND)) return paths;
         throw error;
     }
     try {
@@ -52,7 +52,7 @@ export function nativeCssFiles(
 
 // Keep this independent of Shell so uninstall and tests use the same cleanup.
 // Read the current contents each time, preserving edits made while enabled.
-export function setNativeRadiusRemoved(enabled, paths = nativeCssFiles()) {
+export function setNativeRadiusRemoved(enabled: boolean, paths = nativeCssFiles()) {
     const errors = [];
     for (const path of paths) {
         try {
@@ -66,12 +66,12 @@ export function setNativeRadiusRemoved(enabled, paths = nativeCssFiles()) {
                     .decode(bom ? bytes.subarray(3) : bytes);
                 etag = loadedEtag;
             } catch (error) {
-                if (!error.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND)) throw error;
+                if (!(error instanceof GLib.Error && error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND))) throw error;
                 if (!enabled) continue;
             }
             const updated = updateCss(css, enabled);
             if (updated === css) continue;
-            if (enabled && GLib.mkdir_with_parents(file.get_parent().get_path(), 0o700) !== 0)
+            if (enabled && GLib.mkdir_with_parents(GLib.path_get_dirname(path), 0o700) !== 0)
                 throw new Error('Could not create the GTK4 configuration directory');
             // Atomic replacement plus the etag prevents overwriting concurrent
             // edits. An empty file after cleanup is harmless and avoids a
@@ -80,7 +80,7 @@ export function setNativeRadiusRemoved(enabled, paths = nativeCssFiles()) {
                 Gio.FileCreateFlags.NONE, null);
             if (!written) throw new Error('Could not update the GTK4 stylesheet');
         } catch (error) {
-            errors.push(`${path}: ${error.message}`);
+            errors.push(`${path}: ${String(error)}`);
         }
     }
     // Attempt every file even if one fails, especially during cleanup.

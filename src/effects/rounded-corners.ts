@@ -1,3 +1,6 @@
+import type {CornerConfig} from '../settings/config.js';
+import type {WindowBounds} from '../shell/window-geometry.js';
+
 import Cogl from 'gi://Cogl';
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
@@ -14,20 +17,20 @@ export const RoundedCornersEffect = GObject.registerClass(
     { GTypeName: 'SSCRoundedCornersEffect' },
     class RoundedCornersEffect extends Clutter.Effect {
 
-        _u = null;
-        _pipeline = null;
-        _framebuffer = null;
+        _u: Record<'fillPadding' | 'sampleBounds' | 'bounds' | 'clipRadius' | 'borderWidth' | 'borderColor' | 'borderedAreaBounds' | 'borderedAreaClipRadius' | 'exponent' | 'pixelStep' | 'textureOrigin', number> | null = null;
+        _pipeline: Cogl.Pipeline | null = null;
+        _framebuffer: Cogl.Offscreen | null = null;
         _paintScale = 1;
         _rasterScale = 1;
         _originX = 0;
         _originY = 0;
-        _stage = null;
+        _stage: Clutter.Stage | null = null;
         _purgeConnection = 0;
-        _sample = [0, 0, 0, 0];
+        _sample: [number, number, number, number] = [0, 0, 0, 0];
         _windowBounds = {x1: 0, y1: 0, x2: 0, y2: 0};
 
-        vfunc_set_actor(actor) {
-            if (this._purgeConnection) this._stage.disconnect(this._purgeConnection);
+        override vfunc_set_actor(actor: Clutter.Actor | null) {
+            if (this._purgeConnection) this._stage?.disconnect(this._purgeConnection);
             this._purgeConnection = 0;
             this._stage = null;
             this._framebuffer = null;
@@ -36,7 +39,7 @@ export const RoundedCornersEffect = GObject.registerClass(
             super.vfunc_set_actor(actor);
         }
 
-        vfunc_paint(node, _context, flags) {
+        override vfunc_paint(node: Clutter.PaintNode, _context: Clutter.PaintContext, flags: Clutter.EffectPaintFlags) {
             const actor = this.actor;
             if (!this._pipeline || flags & Clutter.EffectPaintFlags.BYPASS_EFFECT) {
                 node.add_child(Clutter.ActorNode.new(actor, -1));
@@ -47,11 +50,11 @@ export const RoundedCornersEffect = GObject.registerClass(
 
             const stage = actor.get_stage();
             if (stage !== this._stage) {
-                if (this._purgeConnection) this._stage.disconnect(this._purgeConnection);
+                if (this._purgeConnection) this._stage?.disconnect(this._purgeConnection);
                 this._stage = stage;
                 this._purgeConnection = stage.connect('gl-video-memory-purged', () => {
                     this._framebuffer = null;
-                    this._pipeline.set_layer_null_texture(0);
+                    this._pipeline?.set_layer_null_texture(0);
                     this.queue_repaint();
                 });
             }
@@ -75,7 +78,7 @@ export const RoundedCornersEffect = GObject.registerClass(
                 const modelview = target.get_modelview_matrix();
                 const projection = target.get_projection_matrix();
                 const [vx, vy, vw, vh] = target.get_viewport4fv();
-                const project = (x, y) => {
+                const project = (x: number, y: number): [number, number] => {
                     const point = new Graphene.Vec4().init(x, y, 0, 1);
                     const clip = projection.transform_vec4(modelview.transform_vec4(point));
                     return [vx + (1 + clip.get_x() / clip.get_w()) * vw / 2,
@@ -112,9 +115,9 @@ export const RoundedCornersEffect = GObject.registerClass(
                 } catch (error) {
                     // Keep the window usable if the GPU cannot allocate the
                     // target. A later settings/geometry refresh may retry it.
-                    console.error(`[SmoothShellCorners] ${error.message}`);
+                    console.error(`[SmoothShellCorners] ${String(error)}`);
                     this._framebuffer = null;
-                    this._pipeline.set_layer_null_texture(0);
+                    this._pipeline?.set_layer_null_texture(0);
                     this.enabled = false;
                     node.add_child(Clutter.ActorNode.new(actor, -1));
                     return;
@@ -149,16 +152,8 @@ export const RoundedCornersEffect = GObject.registerClass(
             if (dirty) target.add_child(Clutter.ActorNode.new(actor, 255));
         }
 
-        get_uniform_location(name) {
-            return this._pipeline.get_uniform_location(name);
-        }
-
-        set_uniform_float(location, size, values) {
-            this._pipeline.set_uniform_float(location, size, 1, values);
-        }
-
         _ensureUniforms() {
-            if (this._u) return;
+            if (this._u && this._pipeline) return {u: this._u, pipeline: this._pipeline};
             const context = this.actor.get_context().get_backend().get_cogl_context();
             this._pipeline = Cogl.Pipeline.new(context);
             this._pipeline.set_blend('RGBA = ADD (SRC_COLOR, DST_COLOR * (1-SRC_COLOR[A]))');
@@ -170,18 +165,19 @@ export const RoundedCornersEffect = GObject.registerClass(
                 Cogl.SnippetHook.FRAGMENT, ROUNDED_DECLARATIONS, ROUNDED_CODE,
             ));
             this._u = {
-                fillPadding:            this.get_uniform_location('fillPadding'),
-                sampleBounds:           this.get_uniform_location('sampleBounds'),
-                bounds:                 this.get_uniform_location('bounds'),
-                clipRadius:             this.get_uniform_location('clipRadius'),
-                borderWidth:            this.get_uniform_location('borderWidth'),
-                borderColor:            this.get_uniform_location('borderColor'),
-                borderedAreaBounds:     this.get_uniform_location('borderedAreaBounds'),
-                borderedAreaClipRadius: this.get_uniform_location('borderedAreaClipRadius'),
-                exponent:               this.get_uniform_location('exponent'),
-                pixelStep:              this.get_uniform_location('pixelStep'),
-                textureOrigin:          this.get_uniform_location('textureOrigin'),
+                fillPadding:            this._pipeline.get_uniform_location('fillPadding'),
+                sampleBounds:           this._pipeline.get_uniform_location('sampleBounds'),
+                bounds:                 this._pipeline.get_uniform_location('bounds'),
+                clipRadius:             this._pipeline.get_uniform_location('clipRadius'),
+                borderWidth:            this._pipeline.get_uniform_location('borderWidth'),
+                borderColor:            this._pipeline.get_uniform_location('borderColor'),
+                borderedAreaBounds:     this._pipeline.get_uniform_location('borderedAreaBounds'),
+                borderedAreaClipRadius: this._pipeline.get_uniform_location('borderedAreaClipRadius'),
+                exponent:               this._pipeline.get_uniform_location('exponent'),
+                pixelStep:              this._pipeline.get_uniform_location('pixelStep'),
+                textureOrigin:          this._pipeline.get_uniform_location('textureOrigin'),
             };
+            return {u: this._u, pipeline: this._pipeline};
         }
 
         /**
@@ -191,18 +187,17 @@ export const RoundedCornersEffect = GObject.registerClass(
          * @param {object} windowBounds – {x1, y1, x2, y2} in logical pixels
          * @param {number} paintScale   – actual monitor density, without rounding
          */
-        updateUniforms(scaleFactor, cfg, windowBounds, paintScale = 1) {
+        updateUniforms(scaleFactor: number, cfg: CornerConfig, windowBounds: WindowBounds, paintScale = 1) {
             if (paintScale !== this._paintScale) this._framebuffer = null;
             this._paintScale = paintScale;
-            this._ensureUniforms();
-            if (!this._u) return;
+            const {u, pipeline} = this._ensureUniforms();
 
             const bw     = cfg.borderWidth * scaleFactor;
             const bc     = cfg.borderColor;
             const outerR = cfg.cornerRadius * scaleFactor;
             const { padding, smoothing } = cfg;
 
-            const sample = [
+            const sample: [number, number, number, number] = [
                 windowBounds.x1 + padding.left   * scaleFactor,
                 windowBounds.y1 + padding.top    * scaleFactor,
                 windowBounds.x2 - padding.right  * scaleFactor,
@@ -233,15 +228,14 @@ export const RoundedCornersEffect = GObject.registerClass(
             if (outerR > 0)
                 borderInnerR *= radius / outerR;
 
-            const u = this._u;
-            this.set_uniform_float(u.fillPadding,            1, [cfg.fillPadding ? 1 : 0]);
-            this.set_uniform_float(u.bounds,                 4, b);
-            this.set_uniform_float(u.clipRadius,             1, [radius]);
-            this.set_uniform_float(u.borderWidth,            1, [bw]);
-            this.set_uniform_float(u.borderColor,            4, bc);
-            this.set_uniform_float(u.borderedAreaBounds,     4, bb);
-            this.set_uniform_float(u.borderedAreaClipRadius, 1, [borderInnerR]);
-            this.set_uniform_float(u.exponent,               1, [exponent]);
+            pipeline.set_uniform_float(u.fillPadding, 1, 1, [cfg.fillPadding ? 1 : 0]);
+            pipeline.set_uniform_float(u.bounds, 4, 1, b);
+            pipeline.set_uniform_float(u.clipRadius, 1, 1, [radius]);
+            pipeline.set_uniform_float(u.borderWidth, 1, 1, [bw]);
+            pipeline.set_uniform_float(u.borderColor, 4, 1, bc);
+            pipeline.set_uniform_float(u.borderedAreaBounds, 4, 1, bb);
+            pipeline.set_uniform_float(u.borderedAreaClipRadius, 1, 1, [borderInnerR]);
+            pipeline.set_uniform_float(u.exponent, 1, 1, [exponent]);
             this._updateTextureMapping(
                 Math.max(1, Math.ceil(actorW * paintScale) + 1),
                 Math.max(1, Math.ceil(actorH * paintScale) + 1), 0, 0,
@@ -249,7 +243,8 @@ export const RoundedCornersEffect = GObject.registerClass(
             this.queue_repaint();
         }
 
-        _updateTextureMapping(width, height, originX, originY, scale = this._paintScale) {
+        _updateTextureMapping(width: number, height: number, originX: number, originY: number, scale = this._paintScale) {
+            const {u, pipeline} = this._ensureUniforms();
             const bounds = this._windowBounds;
             const sampleBounds = [];
             // Sample clean physical texel centres; do not blend the removed
@@ -266,9 +261,9 @@ export const RoundedCornersEffect = GObject.registerClass(
                 sampleBounds[axis + 2] = Math.max(
                     Math.floor((this._sample[axis + 2] - origin) * scale) - 0.5, middle) / extent;
             }
-            this.set_uniform_float(this._u.pixelStep, 2, [scale / width, scale / height]);
-            this.set_uniform_float(this._u.textureOrigin, 2, [originX, originY]);
-            this.set_uniform_float(this._u.sampleBounds, 4, sampleBounds);
+            pipeline.set_uniform_float(u.pixelStep, 2, 1, [scale / width, scale / height]);
+            pipeline.set_uniform_float(u.textureOrigin, 2, 1, [originX, originY]);
+            pipeline.set_uniform_float(u.sampleBounds, 4, 1, sampleBounds);
         }
     },
 );

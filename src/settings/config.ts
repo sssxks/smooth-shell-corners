@@ -15,7 +15,7 @@ export interface CornerConfig {
     fillPadding: boolean;
     padding: PaddingConfig;
     borderWidth: number;
-    borderColor: number[];
+    borderColor: [number, number, number, number];
     keepRoundedMaximized: boolean;
     keepRoundedFullscreen: boolean;
 }

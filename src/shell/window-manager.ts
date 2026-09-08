@@ -26,6 +26,8 @@
  */
 
 import Gio from 'gi://Gio';
+import Clutter from 'gi://Clutter';
+import St from 'gi://St';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
@@ -37,7 +39,7 @@ import {RoundedCornersEffect} from '../effects/index.js';
 import { setNativeRadiusRemoved } from '../native-radius.js';
 import {readCornerConfig} from '../settings/config.js';
 import {clearWindowFilterCache, shouldSkip as shouldSkipWindow} from './window-filter.js';
-import {connectSignal, disconnectSignals, type SignalConnection} from './connections.js';
+import {disconnectSignals, type SignalConnection} from './connections.js';
 import {
     computeBounds as computeWindowBounds,
     getEffect as getWindowEffect,
@@ -69,26 +71,40 @@ const ROUNDED_CORNERS_EFFECT = 'ssc-rounded-corners';
 //   timeoutId      : GLib.Source | 0,
 // }
 // ─────────────────────────────────────────────────────────────────────────────
-let _settings       = null;
+interface ActorData {
+    shadow: St.Bin | null;
+    bindings: GObject.Binding[];
+    connections: SignalConnection[];
+    animationConnections: SignalConnection[];
+    signalsAttached: boolean;
+    timeoutId: number;
+}
+
+let _settings: Gio.Settings | null = null;
 let _nativeRadiusRemoved = false;
 const _connections: SignalConnection[] = [];   // global connections
-const _actorMap     = new Map();
-let _mutterSettings = null;
+const _actorMap = new Map<Meta.WindowActor, ActorData>();
+let _mutterSettings: Gio.Settings | null = null;
 let _mutterSettingsConn = 0;
-let _fractionalScaling = null;
+let _fractionalScaling: boolean | null = null;
 let _settingsTimeoutId = 0;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Settings helpers
 // ─────────────────────────────────────────────────────────────────────────────
-function getB(key)   { return _settings.get_boolean(key); }
+function currentSettings(): Gio.Settings {
+    if (!_settings) throw new Error('Smooth Shell Corners is disabled');
+    return _settings;
+}
 
-function buildConfig() { return readCornerConfig(_settings); }
+function getB(key: string) { return currentSettings().get_boolean(key); }
+
+function buildConfig() { return readCornerConfig(currentSettings()); }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Logging
 // ─────────────────────────────────────────────────────────────────────────────
-function logDbg(msg) {
+function logDbg(msg: string) {
     if (_settings && getB('debug-mode'))
         console.log(`[SmoothShellCorners] ${msg}`);
 }
@@ -96,16 +112,17 @@ function logDbg(msg) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Application type detection  (libadwaita / libhandy)
 // ─────────────────────────────────────────────────────────────────────────────
-function shouldSkip(win) {
-    return shouldSkipWindow(win, _settings, _nativeRadiusRemoved);
+function shouldSkip(win: Meta.Window) {
+    return shouldSkipWindow(win, currentSettings(), _nativeRadiusRemoved);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Actor helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function getEffect(actor) {
-    return getWindowEffect(actor, ROUNDED_CORNERS_EFFECT);
+function getEffect(actor: Meta.WindowActor) {
+    const effect = getWindowEffect(actor, ROUNDED_CORNERS_EFFECT);
+    return effect instanceof RoundedCornersEffect ? effect : null;
 }
 
 /**
@@ -129,8 +146,8 @@ function isFractionalScalingEnabled() {
         }
 
         const features = _mutterSettings.get_strv('experimental-features');
-        const isWaylandCompositor = (Meta as any).is_wayland_compositor;
-        const isWayland = !isWaylandCompositor || isWaylandCompositor();
+        const isWaylandCompositor = 'is_wayland_compositor' in Meta ? Meta.is_wayland_compositor : null;
+        const isWayland = typeof isWaylandCompositor !== 'function' || isWaylandCompositor();
         _fractionalScaling = isWayland && features.includes('scale-monitor-framebuffer');
     } catch (_) {
         _fractionalScaling = false;
@@ -139,13 +156,13 @@ function isFractionalScalingEnabled() {
 }
 
 /** Get the monitor scale factor for a window (respects fractional scaling). */
-function scaleFactor(win) {
+function scaleFactor(win: Meta.Window | null) {
     // When fractional scaling is enabled the actor dimensions already
     // incorporate the scale, so the shader must use scale = 1.
     if (isFractionalScalingEnabled())
         return 1;
 
-    const idx = win.get_monitor();
+    const idx = win?.get_monitor() ?? 0;
     return global.display.get_monitor_scale(idx);
 }
 
@@ -156,7 +173,7 @@ function scaleFactor(win) {
  *
  * Returns [dx, dy, dw, dh] (all ≤ 0 for the width/height components).
  */
-function computeBounds(actor, fillPadding = false) {
+function computeBounds(actor: Meta.WindowActor, fillPadding = false) {
     return computeWindowBounds(actor, scaleFactor(actor.metaWindow), fillPadding);
 }
 
@@ -164,16 +181,16 @@ function computeBounds(actor, fillPadding = false) {
 // Shadow helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function createShadow(actor) {
-    return createWindowShadow(actor, _settings, scaleFactor(actor.metaWindow));
+function createShadow(actor: Meta.WindowActor) {
+    return createWindowShadow(actor, currentSettings(), scaleFactor(actor.metaWindow));
 }
 
-function refreshShadowStyle(actor, shadowActor) {
-    refreshWindowShadowStyle(actor, shadowActor, _settings, scaleFactor(actor.metaWindow));
+function refreshShadowStyle(actor: Meta.WindowActor, shadowActor: St.Bin | null) {
+    refreshWindowShadowStyle(actor, shadowActor, currentSettings(), scaleFactor(actor.metaWindow));
 }
 
-function refreshShadowClip(actor, shadowActor) {
-    refreshWindowShadowClip(actor, shadowActor, _settings, scaleFactor(actor.metaWindow));
+function refreshShadowClip(actor: Meta.WindowActor, shadowActor: St.Bin | null) {
+    refreshWindowShadowClip(actor, shadowActor, currentSettings(), scaleFactor(actor.metaWindow));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -181,8 +198,8 @@ function refreshShadowClip(actor, shadowActor) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Attach the RoundedCornersEffect and a custom shadow to a window actor. */
-function onAddEffect(actor) {
-    logDbg(`Adding effect to "${actor.metaWindow.title}"`);
+function onAddEffect(actor: Meta.WindowActor) {
+    logDbg(`Adding effect to "${actor.metaWindow?.title}"`);
 
     const target = targetActor(actor);
     const data = _actorMap.get(actor);
@@ -192,7 +209,7 @@ function onAddEffect(actor) {
 
 }
 
-function removeShadow(data) {
+function removeShadow(data: ActorData) {
     for (const binding of data.bindings)
         binding.unbind();
     data.bindings = [];
@@ -200,7 +217,7 @@ function removeShadow(data) {
     data.shadow = null;
 }
 
-function syncShadow(actor, data) {
+function syncShadow(actor: Meta.WindowActor, data: ActorData) {
     if (!getB('custom-shadow')) {
         removeShadow(data);
         return;
@@ -215,7 +232,7 @@ function syncShadow(actor, data) {
 }
 
 /** Remove effects and shadow from a window actor. */
-function onRemoveEffect(actor) {
+function onRemoveEffect(actor: Meta.WindowActor) {
     try {
         logDbg(`Removing effect from "${actor.metaWindow?.title}"`);
     } catch (_) {}
@@ -236,7 +253,7 @@ function onRemoveEffect(actor) {
 }
 
 /** Recompute and push all shader uniforms for a single window. */
-function refreshRoundedCorners(actor) {
+function refreshRoundedCorners(actor: Meta.WindowActor) {
     const win = actor.metaWindow;
     if (!win) return;
 
@@ -267,7 +284,7 @@ function refreshRoundedCorners(actor) {
 }
 
 /** Refresh the shadow style / position for a single actor. */
-function refreshFocus(actor) {
+function refreshFocus(actor: Meta.WindowActor) {
     const data = _actorMap.get(actor);
     if (data?.shadow)
         refreshShadowStyle(actor, data.shadow);
@@ -292,10 +309,6 @@ function onRestacked() {
 // Global signal management
 // ─────────────────────────────────────────────────────────────────────────────
 
-function addConnection(obj, signal, cb) {
-    connectSignal(_connections, obj, signal, cb);
-}
-
 function disconnectAll() {
     disconnectSignals(_connections);
 }
@@ -304,44 +317,41 @@ function disconnectAll() {
 // Per-window signal setup / teardown
 // ─────────────────────────────────────────────────────────────────────────────
 
-function attachWindowSignals(actor) {
+function attachWindowSignals(actor: Meta.WindowActor) {
     const data = _actorMap.get(actor);
     if (data?.signalsAttached)
         return;
 
     if (!data) return;
 
-    const addWinConn = (obj, sig, cb) => {
-        if (obj) data.connections.push({ obj, id: obj.connect(sig, cb) });
-    };
-
-    const win     = actor.metaWindow;
+    const win = actor.metaWindow;
+    if (!win) return;
     const texture = getWindowTexture(actor);
 
     // The window-manager destroy signal starts the close animation. Keep the
     // effect until the actor itself is destroyed, after its final painted frame.
-    addWinConn(actor, 'destroy', () => removeEffectFrom(actor));
+    data.connections.push({object: actor, id: actor.connect('destroy', () => removeEffectFrom(actor))});
 
     // Window resized → update shader uniforms
-    addWinConn(actor, 'notify::first-child', () => refreshRoundedCorners(actor));
-    addWinConn(actor,   'notify::size',  () => { if (actor.metaWindow) refreshRoundedCorners(actor); });
+    data.connections.push({object: actor, id: actor.connect('notify::first-child', () => refreshRoundedCorners(actor))});
+    data.connections.push({object: actor, id: actor.connect('notify::size', () => { if (actor.metaWindow) refreshRoundedCorners(actor); })});
     if (texture)
-        addWinConn(texture, 'size-changed', () => { if (actor.metaWindow) refreshRoundedCorners(actor); });
+        data.connections.push({object: texture, id: texture.connect('size-changed', () => { if (actor.metaWindow) refreshRoundedCorners(actor); })});
 
     // Fullscreen state changed (may not cause a size change)
-    addWinConn(win, 'notify::fullscreen',     () => { if (actor.metaWindow) refreshRoundedCorners(actor); });
-    addWinConn(win, 'notify::maximized-horizontally', () => refreshRoundedCorners(actor));
-    addWinConn(win, 'notify::maximized-vertically', () => refreshRoundedCorners(actor));
+    data.connections.push({object: win, id: win.connect('notify::fullscreen', () => { if (actor.metaWindow) refreshRoundedCorners(actor); })});
+    data.connections.push({object: win, id: win.connect('notify::maximized-horizontally', () => refreshRoundedCorners(actor))});
+    data.connections.push({object: win, id: win.connect('notify::maximized-vertically', () => refreshRoundedCorners(actor))});
     // Focus changed → update shadow style
-    addWinConn(win, 'notify::appears-focused',() => { if (actor.metaWindow) refreshFocus(actor); });
+    data.connections.push({object: win, id: win.connect('notify::appears-focused', () => { if (actor.metaWindow) refreshFocus(actor); })});
     // Monitor / workspace change
-    addWinConn(win, 'workspace-changed',      () => { if (actor.metaWindow) refreshFocus(actor); });
+    data.connections.push({object: win, id: win.connect('workspace-changed', () => { if (actor.metaWindow) refreshFocus(actor); })});
 
     if (data)
         data.signalsAttached = true;
 }
 
-function applyEffectTo(actor) {
+function applyEffectTo(actor: Meta.WindowActor) {
     if (!actor?.metaWindow)
         return;
 
@@ -355,18 +365,17 @@ function applyEffectTo(actor) {
     refreshRoundedCorners(actor);
 }
 
-function applyEffectToWindow(win) {
-    const actor = win.get_compositor_private();
+function applyEffectToWindow(win: Meta.Window) {
+    const actor = win.get_compositor_private<Meta.WindowActor | null>();
     if (actor) applyEffectTo(actor);
     // WindowManager::map handles actors created after window-created. There is
     // no Meta.Window compositor-private property to observe with notify.
 }
 
-function removeEffectFrom(actor) {
+function removeEffectFrom(actor: Meta.WindowActor) {
     const data = _actorMap.get(actor);
     if (!data) return;
-    for (const {obj, id} of data.connections)
-        obj.disconnect(id);
+    disconnectSignals(data.connections);
     onRemoveEffect(actor);
     _actorMap.delete(actor);
 }
@@ -376,55 +385,54 @@ function removeEffectFrom(actor) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function enableEffect() {
+    const settings = currentSettings();
     // Apply to all existing windows
     for (const actor of global.get_window_actors())
         applyEffectTo(actor);
 
     // New window created
-    addConnection(global.display, 'window-created',
-        (_, win) => {
+    _connections.push({object: global.display, id: global.display.connect('window-created', (_, win) => {
             applyEffectToWindow(win);
-        });
+        })});
 
-    addConnection(global.windowManager, 'map', (_, actor) => applyEffectTo(actor));
+    _connections.push({object: global.windowManager, id: global.windowManager.connect('map', (_, actor) => applyEffectTo(actor))});
 
     // Resource scale is integer-rounded by Clutter, so its notify signal cannot
     // distinguish 125% from 150%. Track actual monitor changes instead.
-    addConnection(Main.layoutManager, 'monitors-changed', refreshAll);
-    addConnection(global.display, 'window-entered-monitor', (_, _monitor, win) => {
-        const actor = win.get_compositor_private();
+    _connections.push({object: Main.layoutManager, id: Main.layoutManager.connect('monitors-changed', refreshAll)});
+    _connections.push({object: global.display, id: global.display.connect('window-entered-monitor', (_, _monitor, win) => {
+        const actor = win.get_compositor_private<Meta.WindowActor | null>();
         if (actor) refreshRoundedCorners(actor);
-    });
+    })});
 
     // Minimise: always hide shadow + disable effect to prevent the white
     // background of the shadow actor from showing during the animation.
-    addConnection(global.windowManager, 'minimize',
-        (_, actor) => {
+    _connections.push({object: global.windowManager, id: global.windowManager.connect('minimize', (_, actor) => {
             const data = _actorMap.get(actor);
             if (data) disconnectSignals(data.animationConnections);
             if (data?.shadow)
                 data.shadow.visible = false;
             const fx = getEffect(actor);
             if (fx) fx.enabled = false;
-        });
+        })});
 
     // Unminimise: restore shadow + effect.  For the Magic-Lamp extension,
     // wait until the animation finishes before showing the shadow.
-    addConnection(global.windowManager, 'unminimize',
-        (_, actor) => {
+    _connections.push({object: global.windowManager, id: global.windowManager.connect('unminimize', (_, actor) => {
             const data = _actorMap.get(actor);
             const fx   = getEffect(actor);
 
             if (data) disconnectSignals(data.animationConnections);
             const lamp = actor.get_effect('unminimize-magic-lamp-effect');
-            const timer = lamp?.timerId;
+            const timer = lamp && 'timerId' in lamp && lamp.timerId instanceof Clutter.Timeline
+                ? lamp.timerId : null;
             if (timer && data?.shadow && fx) {
                 data.shadow.visible = false;
-                connectSignal(data.animationConnections, timer, 'completed', () => {
+                data.animationConnections.push({object: timer, id: timer.connect('completed', () => {
                     disconnectSignals(data.animationConnections);
                     if (data.shadow) data.shadow.visible = true;
                     fx.enabled = true;
-                });
+                })});
                 return;
             }
 
@@ -432,13 +440,13 @@ function enableEffect() {
             if (data?.shadow)
                 data.shadow.visible = true;
             if (fx) fx.enabled = true;
-        });
+        })});
 
     // Window re-stack → reorder shadow actors
-    addConnection(global.display, 'restacked', onRestacked);
+    _connections.push({object: global.display, id: global.display.connect('restacked', onRestacked)});
 
     // Settings changed → reapply all with debounce to prevent slider lag
-    addConnection(_settings, 'changed', () => {
+    _connections.push({object: settings, id: settings.connect('changed', () => {
         if (_settingsTimeoutId) {
             GLib.source_remove(_settingsTimeoutId);
             _settingsTimeoutId = 0;
@@ -449,7 +457,7 @@ function enableEffect() {
             _settingsTimeoutId = 0;
             return GLib.SOURCE_REMOVE;
         });
-    });
+    })});
 }
 
 function disableEffect() {
@@ -476,28 +484,28 @@ function disableEffect() {
 
 export default class SmoothShellCornersExtension extends Extension {
 
-    #startupConnection = null;
-    #nativeRadiusConnection = null;
+    #startupConnection = 0;
+    #nativeRadiusConnection = 0;
 
-    #syncNativeRadius(enabled) {
+    #syncNativeRadius(enabled: boolean) {
         try {
             setNativeRadiusRemoved(enabled);
             _nativeRadiusRemoved = enabled;
         } catch (error) {
-            console.error(`[SmoothShellCorners] ${error.message}`);
+            console.error(`[SmoothShellCorners] ${String(error)}`);
             Main.notifyError('Smooth Shell Corners',
-                `Could not ${enabled ? 'remove' : 'restore'} native GTK4 corners. ${error.message}`);
+                `Could not ${enabled ? 'remove' : 'restore'} native GTK4 corners. ${String(error)}`);
             // If enabling only succeeded for some files, roll those back.
             if (enabled) this.#syncNativeRadius(false);
         }
     }
 
-    enable() {
+    override enable() {
         _settings = this.getSettings();
         logDbg('Enabling…');
-        this.#syncNativeRadius(_settings.get_boolean('remove-native-radius'));
+        this.#syncNativeRadius(currentSettings().get_boolean('remove-native-radius'));
         this.#nativeRadiusConnection = _settings.connect('changed::remove-native-radius', () => {
-            this.#syncNativeRadius(_settings.get_boolean('remove-native-radius'));
+            this.#syncNativeRadius(currentSettings().get_boolean('remove-native-radius')); 
             // enableEffect's general settings handler refreshes window effects.
         });
 
@@ -507,7 +515,7 @@ export default class SmoothShellCornersExtension extends Extension {
                 'startup-complete', () => {
                     enableEffect();
                     Main.layoutManager.disconnect(this.#startupConnection);
-                    this.#startupConnection = null;
+                    this.#startupConnection = 0;
                 },
             );
         } else {
@@ -515,18 +523,18 @@ export default class SmoothShellCornersExtension extends Extension {
         }
     }
 
-    disable() {
+    override disable() {
         logDbg('Disabling…');
 
-        if (this.#startupConnection !== null) {
+        if (this.#startupConnection !== 0) {
             Main.layoutManager.disconnect(this.#startupConnection);
-            this.#startupConnection = null;
+            this.#startupConnection = 0;
         }
 
         disableEffect();
-        if (this.#nativeRadiusConnection !== null) {
-            _settings.disconnect(this.#nativeRadiusConnection);
-            this.#nativeRadiusConnection = null;
+        if (this.#nativeRadiusConnection !== 0) {
+            currentSettings().disconnect(this.#nativeRadiusConnection);
+            this.#nativeRadiusConnection = 0;
         }
         this.#syncNativeRadius(false);
         _nativeRadiusRemoved = false;

@@ -1,34 +1,24 @@
-export function findTextureActor(actor: any): any {
-    if (!actor)
-        return null;
-    if (actor.get_texture?.())
-        return actor;
+import Clutter from 'gi://Clutter';
+import Meta from 'gi://Meta';
 
-    let child = actor.get_first_child?.() ?? null;
-    while (child) {
-        const textured = findTextureActor(child);
-        if (textured)
-            return textured;
-        child = child.get_next_sibling?.() ?? null;
-    }
-    return null;
+export interface WindowBounds {
+    x1: number; y1: number; x2: number; y2: number;
 }
 
-export function targetActor(actor: any): any {
-    return findTextureActor(actor) ?? actor;
+export function targetActor(actor: Meta.WindowActor): Meta.WindowActor {
+    return actor;
 }
 
-export function getWindowTexture(actor: any): any {
-    const target = targetActor(actor);
-    return target?.get_texture?.() ?? actor?.get_texture?.() ?? null;
+export function getWindowTexture(actor: Meta.WindowActor): Meta.ShapedTexture | null {
+    return actor.get_texture();
 }
 
-export function getEffect(actor: any, effectName: string): any {
-    const target = targetActor(actor);
-    return target ? target.get_effect(effectName) : null;
+export function getEffect(actor: Meta.WindowActor, effectName: string): Clutter.Effect | null {
+    return actor.get_effect(effectName);
 }
 
-export function contentOffset(win: any): [number, number, number, number] {
+export function contentOffset(win: Meta.Window | null): [number, number, number, number] {
+    if (!win) return [0, 0, 0, 0];
     const buffer = win.get_buffer_rect();
     const frame = win.get_frame_rect();
     return [
@@ -39,7 +29,7 @@ export function contentOffset(win: any): [number, number, number, number] {
     ];
 }
 
-export function computeBounds(actor: any, scale: number, fillPadding = false) {
+export function computeBounds(actor: Meta.WindowActor, scale: number, fillPadding = false): WindowBounds {
     const target = targetActor(actor) ?? actor;
     const targetWidth = target.width;
     const targetHeight = target.height;

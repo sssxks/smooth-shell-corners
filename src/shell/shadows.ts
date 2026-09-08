@@ -1,5 +1,6 @@
 import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
+import Meta from 'gi://Meta';
 import St from 'gi://St';
 
 import {ClipShadowEffect} from '../effects/index.js';
@@ -18,7 +19,7 @@ export function boxShadowCss(config: ShadowConfig, scale: number): string {
     return `box-shadow: ${x}px ${y}px ${blur}px ${spread}px rgba(0,0,0,${alpha})`;
 }
 
-export function createShadow(actor: any, settings: Gio.Settings, scale: number): any {
+export function createShadow(actor: Meta.WindowActor, settings: Gio.Settings, scale: number): St.Bin {
     const shadow = new St.Bin({
         name: 'SSC Shadow',
         style: 'background: transparent;',
@@ -45,8 +46,8 @@ export function createShadow(actor: any, settings: Gio.Settings, scale: number):
 }
 
 export function refreshShadowStyle(
-    actor: any,
-    shadowActor: any,
+    actor: Meta.WindowActor,
+    shadowActor: St.Bin | null,
     settings: Gio.Settings,
     scale: number,
 ): void {
@@ -57,14 +58,15 @@ export function refreshShadowStyle(
     const cssScale = scale / themeScale;
     const padding = SHADOW_PADDING * cssScale;
     const config = readCornerConfig(settings);
-    const shadowConfig = readShadowConfig(settings, actor.metaWindow.appears_focused);
+    const shadowConfig = readShadowConfig(settings, actor.metaWindow?.appears_focused ?? false);
     const exponent = config.smoothing * 10 + 2;
     const radius = config.cornerRadius * 0.5 * exponent * cssScale;
     const inner = shadowActor.get_first_child();
-    if (!inner)
+    if (!(inner instanceof St.Bin))
         return;
 
     const win = actor.metaWindow;
+    if (!win) return;
     const maximized = win.maximizedHorizontally || win.maximizedVertically;
     const hidden = (maximized || win.fullscreen) &&
         !settings.get_boolean('keep-shadow-maximized');
@@ -82,15 +84,15 @@ export function refreshShadowStyle(
 }
 
 export function refreshShadowClip(
-    actor: any,
-    shadowActor: any,
+    actor: Meta.WindowActor,
+    shadowActor: St.Bin | null,
     settings: Gio.Settings,
     scale: number,
 ): void {
     if (!shadowActor)
         return;
     const effect = shadowActor.get_effect(CLIP_SHADOW_EFFECT);
-    if (!effect)
+    if (!(effect instanceof ClipShadowEffect))
         return;
 
     const padding = SHADOW_PADDING * scale;
@@ -124,14 +126,14 @@ export function refreshShadowClip(
     effect.setClip([x1, y1, x2, y2], radius, exponent);
 }
 
-export function refreshShadowGeometry(actor: any, shadowActor: any, scale: number): void {
+export function refreshShadowGeometry(actor: Meta.WindowActor, shadowActor: St.Bin | null, scale: number): void {
     if (!shadowActor)
         return;
 
     const padding = SHADOW_PADDING * scale;
     const [dx, dy, dw, dh] = contentOffset(actor.metaWindow);
     const offsets = [dx - padding, dy - padding, dw + 2 * padding, dh + 2 * padding];
-    shadowActor.get_constraints().forEach((constraint: any, coordinate: number) => {
+    shadowActor.get_constraints().forEach((constraint, coordinate) => {
         if (constraint instanceof Clutter.BindConstraint)
             constraint.offset = offsets[coordinate];
     });

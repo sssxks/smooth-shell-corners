@@ -5,14 +5,17 @@
     "outDir": "dist",
     "rootDir": "src",
     "target": "ES2023",
-    "lib": ["ES2023"],
+    "lib": [
+      "ES2023"
+    ],
     "strict": true,
-    "strictNullChecks": false,
-    "noImplicitAny": false,
-    "useUnknownInCatchVariables": false,
     "skipLibCheck": true,
     "sourceMap": false,
-    "noEmitOnError": true
+    "noEmitOnError": true,
+    "noImplicitOverride": true
   },
-  "include": ["ambient.d.ts", "src/**/*.ts"]
+  "include": [
+    "ambient.d.ts",
+    "src/**/*.ts"
+  ]
 }

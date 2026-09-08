@@ -109,7 +109,8 @@ function setupWindowLifecycle(ready = true) {
         destroy() { this.destroyed = true; },
     };
     const windowManager = emitter();
-    const timeline = emitter();
+    class Timeline {}
+    const timeline = Object.assign(new Timeline(), emitter());
     const actors = [actor];
     const state = vm.runInNewContext(`${source}
         _settings = settings;
@@ -127,6 +128,7 @@ function setupWindowLifecycle(ready = true) {
         shadow,
         global: {get_window_actors: () => actors, display: {...emitter(), get_monitor_scale: () => 1}, windowManager},
         Main: {layoutManager: emitter()},
+        Clutter: {Timeline},
         GObject: {BindingFlags: {SYNC_CREATE: 1}},
         RoundedCornersEffect: class { updateUniforms() {} },
         refreshShadowGeometry() {},

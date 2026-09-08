@@ -1,4 +1,5 @@
 import Cogl from 'gi://Cogl';
+import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
 
@@ -8,9 +9,9 @@ export const ClipShadowEffect = GObject.registerClass(
     { GTypeName: 'SSCClipShadowEffect' },
     class ClipShadowEffect extends Shell.GLSLEffect {
 
-        _u = null;
+        _u: Record<'bounds' | 'radius' | 'exp' | 'step' | 'origin', number> | null = null;
 
-        vfunc_build_pipeline() {
+        override vfunc_build_pipeline() {
             this.add_glsl_snippet(
                 Cogl.SnippetHook.FRAGMENT,
                 SHADOW_DECLARATIONS,
@@ -21,7 +22,7 @@ export const ClipShadowEffect = GObject.registerClass(
         }
 
         _ensureUniforms() {
-            if (this._u) return;
+            if (this._u) return this._u;
             this._u = {
                 bounds:  this.get_uniform_location('shadowBounds'),
                 radius:  this.get_uniform_location('shadowRadius'),
@@ -29,10 +30,11 @@ export const ClipShadowEffect = GObject.registerClass(
                 step:    this.get_uniform_location('shadowStep'),
                 origin:  this.get_uniform_location('shadowOrigin'),
             };
+            return this._u;
         }
 
-        vfunc_paint_target(node, context) {
-            this._ensureUniforms();
+        override vfunc_paint_target(node: Clutter.PaintNode, context: Clutter.PaintContext) {
+            const u = this._ensureUniforms();
             const texture = this.get_texture();
             const scale = this.actor.get_resource_scale();
             const volume = this.actor.get_paint_volume();
@@ -45,9 +47,9 @@ export const ClipShadowEffect = GObject.registerClass(
             // this padding (and any CSS shadow overflowing the allocation).
             const x = Math.trunc(Math.ceil(origin.x + width + 0.75) - Math.round(width) - 3);
             const y = Math.trunc(Math.ceil(origin.y + height + 0.75) - Math.round(height) - 3);
-            this.set_uniform_float(this._u.step, 2,
+            this.set_uniform_float(u.step, 2,
                 [scale / texture.get_width(), scale / texture.get_height()]);
-            this.set_uniform_float(this._u.origin, 2, [x, y]);
+            this.set_uniform_float(u.origin, 2, [x, y]);
             super.vfunc_paint_target(node, context);
         }
 
@@ -60,13 +62,12 @@ export const ClipShadowEffect = GObject.registerClass(
          * Texture mapping is set at paint time, after layout and offscreen
          * allocation; actor dimensions may still be zero when this is called.
          */
-        setClip(bounds, radius, exp) {
-            this._ensureUniforms();
-            if (!this._u) return;
+        setClip(bounds: [number, number, number, number], radius: number, exp: number) {
+            const u = this._ensureUniforms();
 
-            this.set_uniform_float(this._u.bounds,  4, bounds);
-            this.set_uniform_float(this._u.radius,  1, [radius]);
-            this.set_uniform_float(this._u.exp,     1, [exp]);
+            this.set_uniform_float(u.bounds,  4, bounds);
+            this.set_uniform_float(u.radius,  1, [radius]);
+            this.set_uniform_float(u.exp,     1, [exp]);
             this.queue_repaint();
         }
     },

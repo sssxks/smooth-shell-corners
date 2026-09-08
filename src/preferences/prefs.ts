@@ -10,7 +10,7 @@ import {
 import {addShadowPreferences} from './shadows.js';
 
 export default class SmoothShellCornersPreferences extends ExtensionPreferences {
-    async fillPreferencesWindow(window: Adw.PreferencesWindow): Promise<void> {
+    override async fillPreferencesWindow(window: Adw.PreferencesWindow): Promise<void> {
         const settings = this.getSettings();
         window.set_default_size(680, 720);
         addCornerPreferences(window, settings);
