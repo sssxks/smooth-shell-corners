@@ -190,22 +190,28 @@ function onAddEffect(actor) {
 
     target.add_effect_with_name(ROUNDED_CORNERS_EFFECT, new RoundedCornersEffect());
 
-    let shadow = null;
-    const bindings = [];
+}
 
-    if (getB('custom-shadow')) {
-        shadow = createShadow(actor);
+function removeShadow(data) {
+    for (const binding of data.bindings)
+        binding.unbind();
+    data.bindings = [];
+    data.shadow?.destroy();
+    data.shadow = null;
+}
 
-        // Mirror visibility / transform from window to shadow
-        for (const prop of ['pivot-point', 'translation-x', 'translation-y',
-                             'scale-x', 'scale-y', 'visible', 'opacity']) {
-            bindings.push(actor.bind_property(prop, shadow, prop,
-                GObject.BindingFlags.SYNC_CREATE));
-        }
+function syncShadow(actor, data) {
+    if (!getB('custom-shadow')) {
+        removeShadow(data);
+        return;
     }
-
-    data.shadow = shadow;
-    data.bindings = bindings;
+    if (data.shadow) return;
+    data.shadow = createShadow(actor);
+    for (const prop of ['pivot-point', 'translation-x', 'translation-y',
+                       'scale-x', 'scale-y', 'visible', 'opacity']) {
+        data.bindings.push(actor.bind_property(prop, data.shadow, prop,
+            GObject.BindingFlags.SYNC_CREATE));
+    }
 }
 
 /** Remove effects and shadow from a window actor. */
@@ -225,28 +231,7 @@ function onRemoveEffect(actor) {
     const data = _actorMap.get(actor);
     if (!data) return;
 
-    // Unbind property mirrors
-    for (const b of data.bindings)
-        b.unbind();
-
-    // Remove and destroy the custom shadow actor
-    if (data.shadow) {
-        try {
-            data.shadow.get_constraints().forEach(c => data.shadow.remove_constraint(c));
-            if (data.shadow.get_parent())
-                global.windowGroup.remove_child(data.shadow);
-            data.shadow.clear_effects();
-            data.shadow.destroy();
-        } catch (_) {
-            // Shadow actor may already be destroyed
-        }
-    }
-
-    if (data.timeoutId)
-        GLib.source_remove(data.timeoutId);
-
-    data.shadow = null;
-    data.bindings = [];
+    removeShadow(data);
 }
 
 /** Recompute and push all shader uniforms for a single window. */
@@ -272,6 +257,7 @@ function refreshRoundedCorners(actor) {
 
     // Update shadow
     if (data) {
+        syncShadow(actor, data);
         refreshShadowStyle(actor, data.shadow);
         refreshShadowClip(actor, data.shadow);
 

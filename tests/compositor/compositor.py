@@ -119,6 +119,11 @@ export default class Probe {{
         effect = "global.ssc.actor.get_effect('ssc-rounded-corners') !== null"
         evaluate("global.ssc.extension.enable(); true;")
         eventually(effect)
+        shadows = "global.windowGroup.get_children().filter(a => a.name === 'SSC Shadow').length"
+        for enabled in [True, False, True, False]:
+            evaluate(f"global.ssc.settings.set_boolean('custom-shadow', {str(enabled).lower()}); true;")
+            eventually(f"{shadows} === {int(enabled)} && ({effect})")
+        print("Custom shadow toggles apply to existing windows.", flush=True)
         for _ in range(2):
             evaluate("global.ssc.actor.metaWindow.make_fullscreen(); true;")
             eventually(f"global.ssc.actor.metaWindow.fullscreen && !({effect})")
