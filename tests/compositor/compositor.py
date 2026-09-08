@@ -63,6 +63,7 @@ export default class Probe {{
             'settings-schema':'org.gnome.shell.extensions.smooth-shell-corners'}});
         const settings = extension.getSettings();
         settings.set_boolean('skip-libadwaita-app', false);
+        settings.set_boolean('keep-rounded-maximized', false);
         global.ssc = {{RoundedCornersEffect, Pass, Clutter, makeShadow: shadowFixture, extension, settings, checkWindowFilter}};
         this.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {{
             Main.overview.hide();
@@ -132,6 +133,39 @@ export default class Probe {{
             eventually(f"global.ssc.actor.metaWindow.fullscreen && !({effect})")
             evaluate("global.ssc.actor.metaWindow.unmake_fullscreen(); true;")
             eventually(f"!global.ssc.actor.metaWindow.fullscreen && ({effect})")
+        for _ in range(2):
+            evaluate("global.ssc.actor.metaWindow.maximize(); true;")
+            eventually(f"global.ssc.actor.metaWindow.maximizedHorizontally && !({effect})")
+            evaluate("global.ssc.actor.metaWindow.unmaximize(); true;")
+            eventually(f"!global.ssc.actor.metaWindow.maximizedHorizontally && ({effect})")
+        evaluate("global.ssc.settings.set_strv('blacklist', ['org.example.SSCSharpness']); true;")
+        eventually(f"!({effect})")
+        evaluate("global.ssc.settings.set_boolean('whitelist-mode', true); true;")
+        eventually(effect)
+        evaluate("global.ssc.settings.set_strv('blacklist', []); true;")
+        eventually(f"!({effect})")
+        evaluate("global.ssc.settings.set_boolean('whitelist-mode', false); true;")
+        eventually(effect)
+        evaluate("global.ssc.actor.metaWindow.minimize(); true;")
+        eventually("global.ssc.actor.metaWindow.minimized")
+        evaluate("global.ssc.actor.metaWindow.unminimize(); true;")
+        eventually(f"!global.ssc.actor.metaWindow.minimized && ({effect}) && global.ssc.actor.get_effect('ssc-rounded-corners').enabled")
+        for _ in range(2):
+            evaluate("global.ssc.extension.disable(); true;")
+            eventually(f"!({effect}) && {shadows} === 0")
+            evaluate("global.ssc.extension.enable(); true;")
+            eventually(effect)
+        print("Maximize, filter changes, minimize and repeated enable/disable passed.", flush=True)
+        evaluate("global.ssc.settings.set_boolean('custom-shadow', true); true;")
+        eventually(f"{shadows} === 1")
+        evaluate("global.ssc.retained = null; true;")
+        control("window")
+        eventually("global.get_window_actors().some(a => a.metaWindow.title === 'SSC lifecycle test' && a.get_effect('ssc-rounded-corners'))")
+        evaluate("global.ssc.retained = global.get_window_actors().find(a => a.metaWindow.title === 'SSC lifecycle test'); true;")
+        eventually(f"{shadows} === 2")
+        control("close")
+        eventually("!global.get_window_actors().some(a => a.metaWindow.title === 'SSC lifecycle test')")
+        eventually(f"{shadows} === 1")
         evaluate("global.ssc.extension.disable(); true;")
         eventually(f"!({effect})")
         print("Fullscreen lifecycle restores corners on every transition.", flush=True)
@@ -232,6 +266,9 @@ export default class Probe {{
                             edge, profile[max(0, peak-2):peak+4].tolist())
         print("Shadow edge continuity passed at 100%, 125%, 150% and 200%.", flush=True)
 
+        print(run(["gjs", "-m", str(repo / "tests/compositor/native-radius-render.js")]), end="")
+        log = (root / "cache/shell.log").read_text()
+        assert "JS ERROR" not in log, log[-10000:]
         (repo / "dist").mkdir(exist_ok=True)
         artifacts = repo / "tests/artifacts"
         artifacts.mkdir(exist_ok=True)

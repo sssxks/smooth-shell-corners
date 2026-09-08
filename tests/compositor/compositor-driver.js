@@ -28,8 +28,8 @@ if (ARGV[0] === 'eval') {
         new GLib.Variant('(bbs)', [false, false, ARGV[1]]));
     if (!ok) throw new Error('Screenshot failed');
     print('null');
-} else if (ARGV[0] === 'change') {
+} else if (['change', 'window', 'close'].includes(ARGV[0])) {
     call('org.example.SSCSharpness', '/org/example/SSCSharpness', 'org.gtk.Actions',
-        'Activate', new GLib.Variant('(sava{sv})', ['change', [], {}]));
+        'Activate', new GLib.Variant('(sava{sv})', [ARGV[0], [], {}]));
     print('null');
 }

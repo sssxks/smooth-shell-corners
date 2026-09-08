@@ -16,6 +16,17 @@ app.connect('activate', () => {
     const change = new Gio.SimpleAction({name: 'change'});
     change.connect('activate', () => { label.label = 'Updated window content\n\n0123456789\nCache invalidation check'; });
     app.add_action(change);
+    let extra = null;
+    const create = new Gio.SimpleAction({name: 'window'});
+    create.connect('activate', () => {
+        extra = new Gtk.ApplicationWindow({application: app, title: 'SSC lifecycle test',
+            default_width: 320, default_height: 240, decorated: false});
+        extra.present();
+    });
+    app.add_action(create);
+    const close = new Gio.SimpleAction({name: 'close'});
+    close.connect('activate', () => { extra?.destroy(); extra = null; });
+    app.add_action(close);
     win.set_child(label);
     win.present();
 });
