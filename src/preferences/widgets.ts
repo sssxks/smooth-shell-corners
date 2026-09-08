@@ -3,34 +3,12 @@ import Gio from 'gi://Gio';
 import GObject from 'gi://GObject';
 import Gtk from 'gi://Gtk';
 
-export function bindAdjustmentInt(
+export function bindAdjustment(
     settings: Gio.Settings,
     key: string,
     adjustment: Gtk.Adjustment,
 ): void {
-    adjustment.value = settings.get_int(key);
-    adjustment.connect('value-changed', current =>
-        settings.set_int(key, current.value));
-    settings.connect(`changed::${key}`, () => {
-        const value = settings.get_int(key);
-        if (adjustment.value !== value)
-            adjustment.value = value;
-    });
-}
-
-export function bindAdjustmentDouble(
-    settings: Gio.Settings,
-    key: string,
-    adjustment: Gtk.Adjustment,
-): void {
-    adjustment.value = settings.get_double(key);
-    adjustment.connect('value-changed', current =>
-        settings.set_double(key, current.value));
-    settings.connect(`changed::${key}`, () => {
-        const value = settings.get_double(key);
-        if (Math.abs(adjustment.value - value) > 1e-9)
-            adjustment.value = value;
-    });
+    settings.bind(key, adjustment, 'value', Gio.SettingsBindFlags.DEFAULT);
 }
 
 export function bindBoolean(settings: Gio.Settings, key: string, widget: GObject.Object): void {

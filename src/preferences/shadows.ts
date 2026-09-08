@@ -3,7 +3,7 @@ import Gio from 'gi://Gio';
 
 import {gettext as _} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-import {bindAdjustmentInt as bindAdjInt, bindBoolean as bindBool, createSpinRow as makeSpinRow} from './widgets.js';
+import {bindAdjustment, bindBoolean as bindBool, createSpinRow as makeSpinRow} from './widgets.js';
 
 function makeShadowGroup(title: string, prefix: string, settings: Gio.Settings) {
     const group = new Adw.PreferencesGroup({title});
@@ -17,7 +17,7 @@ function makeShadowGroup(title: string, prefix: string, settings: Gio.Settings) 
 
     for (const [titleText, suffix, minimum, maximum] of rows) {
         const item = makeSpinRow(_(titleText), '', minimum, maximum, 1);
-        bindAdjInt(settings, `${prefix}-${suffix}`, item.adj);
+        bindAdjustment(settings, `${prefix}-${suffix}`, item.adj);
         group.add(item.row);
     }
     return group;

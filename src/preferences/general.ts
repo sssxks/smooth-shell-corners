@@ -5,7 +5,7 @@ import Gtk from 'gi://Gtk';
 
 import {gettext as _} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-import {bindAdjustmentDouble as bindAdjDbl, bindAdjustmentInt as bindAdjInt, bindBoolean as bindBool, createSpinRow as makeSpinRow} from './widgets.js';
+import {bindAdjustment, bindBoolean as bindBool, createSpinRow as makeSpinRow} from './widgets.js';
 
 export function addCornerPreferences(win: Adw.PreferencesWindow, settings: Gio.Settings): void {
         // ── Page 1: Corners ─────────────────────────────────────────────────
@@ -25,7 +25,7 @@ export function addCornerPreferences(win: Adw.PreferencesWindow, settings: Gio.S
         // Radius
         const radiusRow = makeSpinRow(
             _('Radius'), _('Corner radius in logical pixels'), 1, 50, 1);
-        bindAdjInt(settings, 'corner-radius', radiusRow.adj);
+        bindAdjustment(settings, 'corner-radius', radiusRow.adj);
         shapeGroup.add(radiusRow.row);
 
         // Smoothing (squircle)
@@ -33,7 +33,7 @@ export function addCornerPreferences(win: Adw.PreferencesWindow, settings: Gio.S
             _('Smoothing'),
             _('0 = perfect circle · 1 = squircle (super-ellipse)'),
             0, 1, 0.05, 2);
-        bindAdjDbl(settings, 'smoothing', smoothRow.adj);
+        bindAdjustment(settings, 'smoothing', smoothRow.adj);
         shapeGroup.add(smoothRow.row);
 
         // ── Group: Padding ───────────────────────────────────────────────────
@@ -57,7 +57,7 @@ export function addCornerPreferences(win: Adw.PreferencesWindow, settings: Gio.S
             [_('Right'),  'padding-right'],
         ]) {
             const r = makeSpinRow(side, '', 0, 100, 1);
-            bindAdjInt(settings, key, r.adj);
+            bindAdjustment(settings, key, r.adj);
             padGroup.add(r.row);
         }
 
@@ -69,7 +69,7 @@ export function addCornerPreferences(win: Adw.PreferencesWindow, settings: Gio.S
         cornersPage.add(borderGroup);
 
         const bwRow = makeSpinRow(_('Width'), '', -15, 15, 1);
-        bindAdjInt(settings, 'border-width', bwRow.adj);
+        bindAdjustment(settings, 'border-width', bwRow.adj);
         borderGroup.add(bwRow.row);
 
         // Border colour (RGBA via Gtk.ColorButton)
