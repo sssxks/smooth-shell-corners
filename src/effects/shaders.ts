@@ -76,6 +76,67 @@ export const ROUNDED_CODE = /* glsl */`
     }
 `;
 
+// Paint the shadow in the same local coordinate space as the window. Since
+// this pass belongs to the window effect, overview clones transform it too.
+export const EFFECT_SHADOW_DECLARATIONS = /* glsl */`
+uniform vec4  effectShadowBounds;
+uniform vec4  effectShadowHole;
+uniform float effectShadowRadius;
+uniform float effectShadowHoleRadius;
+uniform float effectShadowExp;
+uniform float effectShadowOpacity;
+uniform float effectShadowBlur;
+uniform vec2  effectShadowRectOrigin;
+uniform vec2  effectShadowRectSize;
+
+float effectCircle(vec2 p, vec2 center, float r) {
+    vec2 d = p - center;
+    float dist2 = dot(d, d);
+    float outer = r + 0.5;
+    if (dist2 >= outer * outer) return 0.0;
+    float inner = r - 0.5;
+    if (dist2 <= inner * inner) return 1.0;
+    return outer - sqrt(dist2);
+}
+
+float effectSquircle(vec2 p, vec2 center, float r, float e) {
+    vec2 d = abs(p - center);
+    float dist = pow(pow(d.x, e) + pow(d.y, e), 1.0 / e);
+    return clamp(r - dist + 0.5, 0.0, 1.0);
+}
+
+float effectOpacity(vec2 p, vec4 b, float r, float e) {
+    if (p.x < b.x || p.x > b.z || p.y < b.y || p.y > b.w) return 0.0;
+    float cl = b.x + r, cr = b.z - r, ct = b.y + r, cb = b.w - r;
+    vec2 c;
+    if (p.x < cl) c.x = cl;
+    else if (p.x > cr) c.x = cr;
+    else return 1.0;
+    if (p.y < ct) c.y = ct;
+    else if (p.y > cb) c.y = cb;
+    else return 1.0;
+    return e <= 2.0 ? effectCircle(p, c, r) : effectSquircle(p, c, r, e);
+}
+
+float effectSignedDistance(vec2 p, vec4 b, float r, float e) {
+    vec2 c = clamp(p, b.xy + vec2(r), b.zw - vec2(r));
+    vec2 d = abs(p - c);
+    float distance = e <= 2.0 ? length(d) : pow(pow(d.x, e) + pow(d.y, e), 1.0 / e);
+    return distance - r;
+}
+`;
+
+export const EFFECT_SHADOW_CODE = /* glsl */`
+    vec2 p = cogl_tex_coord_in[0].xy * effectShadowRectSize + effectShadowRectOrigin;
+    float distance = effectSignedDistance(p, effectShadowBounds,
+                                          effectShadowRadius, effectShadowExp);
+    float outer = effectShadowBlur > 0.0
+        ? 1.0 - smoothstep(0.0, effectShadowBlur, distance)
+        : effectOpacity(p, effectShadowBounds, effectShadowRadius, effectShadowExp);
+    cogl_color_out = vec4(0.0, 0.0, 0.0,
+                          outer * effectShadowOpacity);
+`;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GLSL – Clip shadow shader
 //

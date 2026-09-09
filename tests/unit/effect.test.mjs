@@ -10,6 +10,7 @@ const source = readFileSync(new URL('../../dist/effects/rounded-corners.js', imp
 class EffectBase {
     actor = {
         get_width: () => 100, get_height: () => 80,
+        invalidate_paint_volume: () => {},
         get_context: () => ({get_backend: () => ({get_cogl_context: () => null})}),
     };
     get values() { return this._pipeline.values; }

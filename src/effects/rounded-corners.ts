@@ -1,4 +1,4 @@
-import type {CornerConfig} from '../settings/config.js';
+import type {CornerConfig, ShadowConfig} from '../settings/config.js';
 import type {WindowBounds} from '../shell/window-geometry.js';
 
 import Cogl from 'gi://Cogl';
@@ -11,7 +11,11 @@ import {
     FILL_DECLARATIONS,
     ROUNDED_CODE,
     ROUNDED_DECLARATIONS,
+    EFFECT_SHADOW_CODE,
+    EFFECT_SHADOW_DECLARATIONS,
 } from './shaders.js';
+
+const SHADOW_PADDING = 80;
 
 export const RoundedCornersEffect = GObject.registerClass(
     { GTypeName: 'SSCRoundedCornersEffect' },
@@ -32,6 +36,16 @@ export const RoundedCornersEffect = GObject.registerClass(
         _purgeConnection = 0;
         _sample: [number, number, number, number] = [0, 0, 0, 0];
         _windowBounds = {x1: 0, y1: 0, x2: 0, y2: 0};
+        _shadowEnabled = false;
+        _shadowBounds: [number, number, number, number] = [0, 0, 0, 0];
+        _shadowHole: [number, number, number, number] = [0, 0, 0, 0];
+        _shadowRadius = 0;
+        _shadowHoleRadius = 0;
+        _shadowExponent = 2;
+        _shadowOpacity = 0;
+        _shadowBlur = 0;
+        _shadowPipeline: Cogl.Pipeline | null = null;
+        _shadowUniforms: Record<string, number> | null = null;
 
         override vfunc_set_actor(actor: Clutter.Actor | null) {
             if (this._purgeConnection) this._stage?.disconnect(this._purgeConnection);
@@ -40,7 +54,19 @@ export const RoundedCornersEffect = GObject.registerClass(
             this._framebuffer = null;
             this._pipeline = null;
             this._u = null;
+            this._shadowPipeline = null;
+            this._shadowUniforms = null;
             super.vfunc_set_actor(actor);
+        }
+
+        override vfunc_modify_paint_volume(volume: Clutter.PaintVolume): boolean {
+            if (!this._shadowEnabled) return false;
+            const pad = SHADOW_PADDING * this._paintScale;
+            const origin = volume.get_origin();
+            volume.set_origin(new Graphene.Point3D({x: origin.x - pad, y: origin.y - pad, z: origin.z}));
+            volume.set_width(volume.get_width() + 2 * pad);
+            volume.set_height(volume.get_height() + 2 * pad);
+            return true;
         }
 
         override vfunc_paint(node: Clutter.PaintNode, _context: Clutter.PaintContext, flags: Clutter.EffectPaintFlags) {
@@ -103,6 +129,25 @@ export const RoundedCornersEffect = GObject.registerClass(
             }
             const width = Math.max(1, Math.ceil(actor.get_width() * scale) + 1);
             const height = Math.max(1, Math.ceil(actor.get_height() * scale) + 1);
+
+            if (this._shadowEnabled && this._shadowPipeline && this._shadowUniforms) {
+                const pad = SHADOW_PADDING;
+                const u = this._shadowUniforms;
+                this._shadowPipeline.set_uniform_float(u.effectShadowBounds, 4, 1, this._shadowBounds);
+                this._shadowPipeline.set_uniform_float(u.effectShadowHole, 4, 1, this._shadowHole);
+                this._shadowPipeline.set_uniform_float(u.effectShadowRadius, 1, 1, [this._shadowRadius]);
+                this._shadowPipeline.set_uniform_float(u.effectShadowHoleRadius, 1, 1, [this._shadowHoleRadius]);
+                this._shadowPipeline.set_uniform_float(u.effectShadowExp, 1, 1, [this._shadowExponent]);
+                this._shadowPipeline.set_uniform_float(u.effectShadowOpacity, 1, 1, [this._shadowOpacity]);
+                this._shadowPipeline.set_uniform_float(u.effectShadowBlur, 1, 1, [this._shadowBlur]);
+                this._shadowPipeline.set_uniform_float(u.effectShadowRectOrigin, 2, 1, [-pad, -pad]);
+                this._shadowPipeline.set_uniform_float(u.effectShadowRectSize, 2, 1,
+                    [actor.get_width() + 2 * pad, actor.get_height() + 2 * pad]);
+                const shadow = Clutter.PipelineNode.new(this._shadowPipeline);
+                shadow.add_rectangle(new Clutter.ActorBox({x1: -pad, y1: -pad,
+                    x2: actor.get_width() + pad, y2: actor.get_height() + pad}));
+                node.add_child(shadow);
+            }
             let dirty = !!(flags & Clutter.EffectPaintFlags.ACTOR_DIRTY);
             if (originX !== this._originX || originY !== this._originY) dirty = true;
             if (scale !== this._rasterScale) dirty = true;
@@ -184,6 +229,35 @@ export const RoundedCornersEffect = GObject.registerClass(
             return {u: this._u, pipeline: this._pipeline};
         }
 
+        _ensureShadowPipeline() {
+            if (this._shadowPipeline) return;
+            const context = this.actor.get_context().get_backend().get_cogl_context();
+            const pipeline = Cogl.Pipeline.new(context);
+            // A layer supplies normalized rectangle coordinates to the
+            // fragment snippet. The texel is never sampled.
+            const coordinateTexture = Cogl.Texture2D.new_with_size(context, 1, 1);
+            coordinateTexture.allocate();
+            pipeline.set_layer_texture(0, coordinateTexture);
+            const color = new Cogl.Color();
+            color.init_from_4f(0, 0, 0, 1);
+            pipeline.set_color(color);
+            pipeline.set_blend('RGBA = ADD (SRC_COLOR, DST_COLOR * (1-SRC_COLOR[A]))');
+            pipeline.add_snippet(Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT,
+                EFFECT_SHADOW_DECLARATIONS, EFFECT_SHADOW_CODE));
+            this._shadowPipeline = pipeline;
+            this._shadowUniforms = {
+                effectShadowBounds: pipeline.get_uniform_location('effectShadowBounds'),
+                effectShadowHole: pipeline.get_uniform_location('effectShadowHole'),
+                effectShadowRadius: pipeline.get_uniform_location('effectShadowRadius'),
+                effectShadowHoleRadius: pipeline.get_uniform_location('effectShadowHoleRadius'),
+                effectShadowExp: pipeline.get_uniform_location('effectShadowExp'),
+                effectShadowOpacity: pipeline.get_uniform_location('effectShadowOpacity'),
+                effectShadowBlur: pipeline.get_uniform_location('effectShadowBlur'),
+                effectShadowRectOrigin: pipeline.get_uniform_location('effectShadowRectOrigin'),
+                effectShadowRectSize: pipeline.get_uniform_location('effectShadowRectSize'),
+            };
+        }
+
         /**
          * Push updated values to every shader uniform.
          * @param {number} scaleFactor  – monitor scale factor (HiDPI)
@@ -191,7 +265,8 @@ export const RoundedCornersEffect = GObject.registerClass(
          * @param {object} windowBounds – {x1, y1, x2, y2} in logical pixels
          * @param {number} paintScale   – actual monitor density, without rounding
          */
-        updateUniforms(scaleFactor: number, cfg: CornerConfig, windowBounds: WindowBounds, paintScale = 1) {
+        updateUniforms(scaleFactor: number, cfg: CornerConfig, windowBounds: WindowBounds,
+            paintScale = 1, shadow?: ShadowConfig) {
             if (paintScale !== this._paintScale) this._framebuffer = null;
             this._paintScale = paintScale;
             const {u, pipeline} = this._ensureUniforms();
@@ -213,14 +288,12 @@ export const RoundedCornersEffect = GObject.registerClass(
                 : sample;
             this._sample = sample;
             this._windowBounds = windowBounds;
-
+            const actorW = this.actor.get_width();
+            const actorH = this.actor.get_height();
             const bb = [b[0] + bw, b[1] + bw, b[2] - bw, b[3] - bw];
 
             let borderInnerR = outerR - Math.abs(bw);
             if (borderInnerR < 0.001) borderInnerR = 0.0;
-
-            const actorW = this.actor.get_width();
-            const actorH = this.actor.get_height();
 
             let exponent = smoothing * 10 + 2;
             let radius   = outerR * 0.5 * exponent;
@@ -231,6 +304,28 @@ export const RoundedCornersEffect = GObject.registerClass(
             }
             if (outerR > 0)
                 borderInnerR *= radius / outerR;
+
+            const shadowActor = this.actor;
+            this._shadowEnabled = !!shadow && shadow.opacity > 0;
+            if (shadow) {
+                this._ensureShadowPipeline();
+                const spread = shadow.spread * scaleFactor;
+                const blur = shadow.blur * scaleFactor;
+                // These bounds are in actor-local coordinates. The paint
+                // rectangle is padded separately, and its texture origin is
+                // translated back to this same coordinate space at paint.
+                this._shadowBounds = [-spread + shadow.xOffset * scaleFactor,
+                    -spread + shadow.yOffset * scaleFactor,
+                    actorW + spread + shadow.xOffset * scaleFactor,
+                    actorH + spread + shadow.yOffset * scaleFactor];
+                this._shadowHole = [b[0], b[1], b[2], b[3]];
+                this._shadowRadius = radius + spread;
+                this._shadowHoleRadius = radius;
+                this._shadowExponent = exponent;
+                this._shadowOpacity = shadow.opacity / 255;
+                this._shadowBlur = blur;
+            }
+            shadowActor.invalidate_paint_volume?.();
 
             pipeline.set_uniform_float(u.fillPadding, 1, 1, [cfg.fillPadding ? 1 : 0]);
             pipeline.set_uniform_float(u.bounds, 4, 1, b);
@@ -271,4 +366,3 @@ export const RoundedCornersEffect = GObject.registerClass(
         }
     },
 );
-

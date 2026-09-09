@@ -146,19 +146,14 @@ function setupWindowLifecycle(ready = true) {
 for (const finish of ['destroy', 'disable']) {
     test(`closing window keeps corners until ${finish} and releases its resources`, () => {
         const state = setupWindowLifecycle();
-        const {actor, shadow, windowManager} = state;
+        const {actor, windowManager} = state;
         assert.equal(actor.effects.size, 1);
         windowManager.emit('destroy', actor);
         state.actors.length = 0;
         assert.equal(actor.effects.size, 1, 'close animation retains corner effect');
-        assert.equal(shadow.destroyed, false);
-        actor.opacity = 96;
-        actor.emit('notify::opacity');
-        assert.equal(shadow.opacity, 96, 'shadow follows the close fade');
         if (finish === 'destroy') actor.emit('destroy');
         else state.disable();
         assert.equal(actor.effects.size, 0);
-        assert.equal(shadow.destroyed, true);
         assert.equal(state.tracked(), 0);
         assert.equal(actor.callbacks.size, 0);
         assert.equal(actor.metaWindow.callbacks.size, 0);
@@ -195,15 +190,13 @@ for (const finish of ['completed', 'disable']) {
         state.actor.effects.set('unminimize-magic-lamp-effect', {timerId: state.timeline});
         state.windowManager.emit('minimize', state.actor);
         state.windowManager.emit('unminimize', state.actor);
-        assert.equal(state.shadow.visible, false);
         assert.equal(state.timeline.callbacks.size, 1);
         if (finish === 'completed') {
             state.timeline.emit('completed');
-            assert.equal(state.shadow.visible, true);
+            assert.equal(state.actor.get_effect('ssc-rounded-corners').enabled, true);
         } else {
             state.disable();
             state.timeline.emit('completed');
-            assert.equal(state.shadow.visible, false);
         }
         assert.equal(state.timeline.callbacks.size, 0);
         state.disable();

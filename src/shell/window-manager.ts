@@ -1,9 +1,7 @@
 // Window tracking outlives temporary exclusions; actor destruction and disable own cleanup.
 import Gio from 'gi://Gio';
 import Clutter from 'gi://Clutter';
-import St from 'gi://St';
 import GLib from 'gi://GLib';
-import GObject from 'gi://GObject';
 import Meta from 'gi://Meta';
 
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -11,24 +9,16 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {RoundedCornersEffect} from '../effects/index.js';
 import { setNativeRadiusRemoved } from '../native-radius.js';
-import {readConfig, type ExtensionConfig} from '../settings/config.js';
+import {readConfig} from '../settings/config.js';
 import {clearWindowFilterCache, shouldSkip as shouldSkipWindow} from './window-filter.js';
 import {disconnectSignals, type SignalConnection} from './connections.js';
 import {
     computeBounds as computeWindowBounds,
 } from './window-geometry.js';
-import {
-    createShadow as createWindowShadow,
-    refreshShadowClip as refreshWindowShadowClip,
-    refreshShadowGeometry,
-    refreshShadowStyle as refreshWindowShadowStyle,
-} from './shadows.js';
 
 const ROUNDED_CORNERS_EFFECT = 'ssc-rounded-corners';
 
 interface ActorData {
-    shadow: St.Bin | null;
-    bindings: GObject.Binding[];
     connections: SignalConnection[];
     animationConnections: SignalConnection[];
 }
@@ -98,29 +88,7 @@ function scaleFactor(win: Meta.Window | null) {
     return global.display.get_monitor_scale(idx);
 }
 
-function removeShadow(data: ActorData) {
-    for (const binding of data.bindings)
-        binding.unbind();
-    data.bindings = [];
-    data.shadow?.destroy();
-    data.shadow = null;
-}
-
-function syncShadow(actor: Meta.WindowActor, data: ActorData, config: ExtensionConfig, scale: number) {
-    if (!config.customShadow) {
-        removeShadow(data);
-        return;
-    }
-    if (data.shadow) return;
-    data.shadow = createWindowShadow(actor, scale);
-    for (const prop of ['pivot-point', 'translation-x', 'translation-y',
-                       'scale-x', 'scale-y', 'visible', 'opacity']) {
-        data.bindings.push(actor.bind_property(prop, data.shadow, prop,
-            GObject.BindingFlags.SYNC_CREATE));
-    }
-}
-
-/** Remove effects and shadow from a window actor. */
+/** Remove the effect from a window actor. */
 function onRemoveEffect(actor: Meta.WindowActor) {
     try {
         logDbg(`Removing effect from "${actor.metaWindow?.title}"`);
@@ -136,7 +104,6 @@ function onRemoveEffect(actor: Meta.WindowActor) {
     if (!data) return;
 
     disconnectSignals(data.animationConnections);
-    removeShadow(data);
 }
 
 /** Recompute and push all shader uniforms for a single window. */
@@ -161,34 +128,15 @@ function refreshRoundedCorners(actor: Meta.WindowActor) {
     fx.enabled = true;
 
     const scale = scaleFactor(win);
+    const shadow = actor.metaWindow?.appears_focused ? cfg.focusedShadow : cfg.unfocusedShadow;
     fx.updateUniforms(scale, cfg, computeWindowBounds(actor, scale, cfg.fillPadding),
-        global.display.get_monitor_scale(win.get_monitor()));
-    syncShadow(actor, data, cfg, scale);
-    refreshWindowShadowStyle(actor, data.shadow, cfg, scale);
-    refreshWindowShadowClip(actor, data.shadow, cfg, scale);
-    refreshShadowGeometry(actor, data.shadow, scale);
-}
-
-/** Refresh the shadow style / position for a single actor. */
-function refreshFocus(actor: Meta.WindowActor) {
-    const data = _actorMap.get(actor);
-    if (data?.shadow)
-        refreshWindowShadowStyle(actor, data.shadow, readConfig(currentSettings()), scaleFactor(actor.metaWindow));
+        global.display.get_monitor_scale(win.get_monitor()), cfg.customShadow ? shadow : undefined);
 }
 
 /** Refresh tracked windows without replacing their lifecycle connections. */
 function refreshAll() {
     for (const actor of global.get_window_actors())
         refreshRoundedCorners(actor);
-}
-
-/** When windows are re-stacked, keep shadow actors sorted below their windows. */
-function onRestacked() {
-    for (const actor of global.get_window_actors()) {
-        const data = _actorMap.get(actor);
-        if (actor.visible && data?.shadow)
-            global.windowGroup.set_child_below_sibling(data.shadow, actor);
-    }
 }
 
 function attachWindowSignals(actor: Meta.WindowActor) {
@@ -213,10 +161,9 @@ function attachWindowSignals(actor: Meta.WindowActor) {
     data.connections.push({object: win, id: win.connect('notify::fullscreen', () => refreshRoundedCorners(actor))});
     data.connections.push({object: win, id: win.connect('notify::maximized-horizontally', () => refreshRoundedCorners(actor))});
     data.connections.push({object: win, id: win.connect('notify::maximized-vertically', () => refreshRoundedCorners(actor))});
-    // Focus changed → update shadow style
-    data.connections.push({object: win, id: win.connect('notify::appears-focused', () => refreshFocus(actor))});
-    // Monitor / workspace change
-    data.connections.push({object: win, id: win.connect('workspace-changed', () => refreshFocus(actor))});
+    // Focus changed → update shadow configuration
+    data.connections.push({object: win, id: win.connect('notify::appears-focused', () => refreshRoundedCorners(actor))});
+    data.connections.push({object: win, id: win.connect('workspace-changed', () => refreshRoundedCorners(actor))});
 
 }
 
@@ -226,7 +173,7 @@ function applyEffectTo(actor: Meta.WindowActor) {
 
     if (!_actorMap.has(actor)) {
         _actorMap.set(actor, {
-            shadow: null, bindings: [], connections: [], animationConnections: [],
+            connections: [], animationConnections: [],
         });
         attachWindowSignals(actor);
     }
@@ -269,18 +216,13 @@ function enableEffect() {
         if (actor) refreshRoundedCorners(actor);
     })});
 
-    // Minimise: hide the shadow to prevent its white background from showing
-    // during the animation. Keep the corner effect active so the animated
-    // window never briefly falls back to square corners.
+    // Keep the effect active during minimize animations.
     _connections.push({object: global.windowManager, id: global.windowManager.connect('minimize', (_, actor) => {
             const data = _actorMap.get(actor);
             if (data) disconnectSignals(data.animationConnections);
-            if (data?.shadow)
-                data.shadow.visible = false;
         })});
 
-    // Unminimise: restore shadow + effect.  For the Magic-Lamp extension,
-    // wait until the animation finishes before showing the shadow.
+    // Unminimise: keep the effect active through the animation.
     _connections.push({object: global.windowManager, id: global.windowManager.connect('unminimize', (_, actor) => {
             const data = _actorMap.get(actor);
             const fx   = getEffect(actor);
@@ -289,24 +231,18 @@ function enableEffect() {
             const lamp = actor.get_effect('unminimize-magic-lamp-effect');
             const timer = lamp && 'timerId' in lamp && lamp.timerId instanceof Clutter.Timeline
                 ? lamp.timerId : null;
-            if (timer && data?.shadow && fx) {
-                data.shadow.visible = false;
-                data.animationConnections.push({object: timer, id: timer.connect('completed', () => {
-                    disconnectSignals(data.animationConnections);
-                    if (data.shadow) data.shadow.visible = true;
+            if (timer && fx && data) {
+                const animationData = data;
+                animationData.animationConnections.push({object: timer, id: timer.connect('completed', () => {
+                    disconnectSignals(animationData.animationConnections);
                     fx.enabled = true;
                 })});
                 return;
             }
 
             // Standard unminimise (no magic lamp)
-            if (data?.shadow)
-                data.shadow.visible = true;
             if (fx) fx.enabled = true;
         })});
-
-    // Window re-stack → reorder shadow actors
-    _connections.push({object: global.display, id: global.display.connect('restacked', onRestacked)});
 
     // Settings changed → reapply all with debounce to prevent slider lag
     _connections.push({object: settings, id: settings.connect('changed', () => {

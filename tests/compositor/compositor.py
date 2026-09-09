@@ -64,7 +64,7 @@ export default class Probe {{
         const settings = extension.getSettings();
         settings.set_boolean('skip-libadwaita-app', false);
         settings.set_boolean('keep-rounded-maximized', false);
-        global.ssc = {{RoundedCornersEffect, Pass, Clutter, makeShadow: shadowFixture, extension, settings, checkWindowFilter}};
+        global.ssc = {{RoundedCornersEffect, Pass, Clutter, overview: Main.overview, makeShadow: shadowFixture, extension, settings, checkWindowFilter}};
         this.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {{
             Main.overview.hide();
             this.owner = Gio.bus_own_name(Gio.BusType.SESSION, 'org.example.SSCProbe',
@@ -123,11 +123,25 @@ export default class Probe {{
         effect = "global.ssc.actor.get_effect('ssc-rounded-corners') !== null"
         evaluate("global.ssc.extension.enable(); true;")
         eventually(effect)
+        # The shadow is painted by the window effect, so it remains part of
+        # the transformed overview clone instead of being a sibling actor.
         shadows = "global.windowGroup.get_children().filter(a => a.name === 'SSC Shadow').length"
         for enabled in [True, False, True, False]:
             evaluate(f"global.ssc.settings.set_boolean('custom-shadow', {str(enabled).lower()}); true;")
-            eventually(f"{shadows} === {int(enabled)} && ({effect})")
+            eventually(f"{shadows} === 0 && ({effect})")
+            expected = "true" if enabled else "false"
+            eventually(f"global.ssc.actor.get_effect('ssc-rounded-corners')._shadowEnabled === {expected}")
         print("Custom shadow toggles apply to existing windows.", flush=True)
+
+        evaluate("global.ssc.settings.set_boolean('custom-shadow', true); true;")
+        eventually("global.ssc.actor.get_effect('ssc-rounded-corners')._shadowEnabled")
+        evaluate("global.ssc.overview.show(); true;")
+        eventually("global.ssc.overview.visible")
+        eventually("global.ssc.actor.get_effect('ssc-rounded-corners')._shadowEnabled && global.ssc.actor.get_effect('ssc-rounded-corners').enabled")
+        evaluate("global.ssc.overview.hide(); true;")
+        eventually("!global.ssc.overview.visible")
+        eventually("global.ssc.actor.get_effect('ssc-rounded-corners')._shadowEnabled && global.ssc.actor.get_effect('ssc-rounded-corners').enabled")
+        print("Effect shadow remains enabled through overview show and hide.", flush=True)
         for _ in range(2):
             evaluate("global.ssc.actor.metaWindow.make_fullscreen(); true;")
             eventually(f"global.ssc.actor.metaWindow.fullscreen && !({effect})")
@@ -160,15 +174,15 @@ export default class Probe {{
             eventually(effect)
         print("Maximize, filter changes, minimize and repeated enable/disable passed.", flush=True)
         evaluate("global.ssc.settings.set_boolean('custom-shadow', true); true;")
-        eventually(f"{shadows} === 1")
+        eventually(f"{shadows} === 0")
         evaluate("global.ssc.retained = null; true;")
         control("window")
         eventually("global.get_window_actors().some(a => a.metaWindow.title === 'SSC lifecycle test' && a.get_effect('ssc-rounded-corners'))")
         evaluate("global.ssc.retained = global.get_window_actors().find(a => a.metaWindow.title === 'SSC lifecycle test'); true;")
-        eventually(f"{shadows} === 2")
+        eventually(f"{shadows} === 0")
         control("close")
         eventually("!global.get_window_actors().some(a => a.metaWindow.title === 'SSC lifecycle test')")
-        eventually(f"{shadows} === 1")
+        eventually(f"{shadows} === 0")
         evaluate("global.ssc.extension.disable(); true;")
         eventually(f"!({effect})")
         print("Fullscreen lifecycle restores corners on every transition.", flush=True)
