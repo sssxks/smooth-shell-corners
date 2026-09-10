@@ -1,5 +1,20 @@
-Smooth Shell Corners 0.1.1 is an early preview focused on consistent corners,
-crisp text at fractional scaling, clipped border filling, and custom shadows.
+Smooth Shell Corners 0.1.2 improves window-body detection, shadow rendering,
+and GNOME Shell responsiveness. This remains an early preview.
+
+Changes since 0.1.1:
+
+- GPU detection accounts for native transparent window margins and refreshes
+  after resizing or content changes. Utility windows and unsupported shapes
+  preserve their appearance.
+- Shared shadow tiles and reusable render targets reduce repeated rendering and
+  GPU allocation churn. Blur stays stable during resizing, shadow spread survives
+  blur, and maximized/fullscreen windows respect their shadow setting.
+- GTK4 CSS updates and toolkit detection use asynchronous file I/O. Queued CSS
+  changes and stale-callback checks protect rapid toggles and disable/re-enable.
+- Release ZIPs exclude compiled schemas and standalone recovery scripts.
+
+Type checking, lint, 32 unit tests, real GJS tests, isolated compositor tests,
+standalone cleanup, and ZIP contents/import reachability checks passed.
 
 Tested locally on Bazzite / GNOME Shell 50.4 / Wayland. GNOME 45–49 remain
 unverified. Mixed-monitor and other window-effect combinations need testers.
