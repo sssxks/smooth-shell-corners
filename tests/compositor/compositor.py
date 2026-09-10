@@ -237,6 +237,24 @@ export default class Probe {{
             compare(f"fixed-{scale}-{position}-{width}", baseline, capture("fixed"),
                     scale, position, position, width, height)
 
+        # Reused capacity must render like a fresh effect after growing,
+        # shrinking and resizing within a bucket, including fractional scales.
+        for scale in [1, 1.25, 1.5, 2]:
+            control("scale", scale)
+            for width, height in [(330, 260), (580, 400), (200, 160)]:
+                evaluate(f"global.ssc.makeShadow(true, 24, 7, 0, 0, {scale}, 400, 300)")
+                capture("resize-initial")
+                evaluate(f"global.ssc.resizeShadow({width}, {height})")
+                reused = capture("resize-reused")
+                evaluate(f"global.ssc.makeShadow(true, 24, 7, 0, 0, {scale}, {width}, {height})")
+                fresh = capture("resize-fresh")
+                delta = abs(reused[:round(700*scale), :round(900*scale)] -
+                            fresh[:round(700*scale), :round(900*scale)])
+                assert delta.max() <= 1, ("resized shadow differs", scale, width, height, delta.max())
+        evaluate("global.ssc.shadowFixture.forEach(a => a.destroy()); global.ssc.shadowFixture = null; true;")
+        control("scale", 1)
+        print("Reused source/shadow capacity matches fresh allocations at all four scales.", flush=True)
+
         # New app content must invalidate the cached framebuffer.
         control("change")
         time.sleep(0.15)

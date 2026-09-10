@@ -114,3 +114,11 @@ a new threshold first. Name the checker `bisect-check.py`, not `bisect.py`,
 which would shadow Python's standard-library module used by the analyzer.
 
 See [the measured regression and pass breakdown](results.md).
+
+## Resize memory regression
+
+Run `uv run tests/performance/gpu/run.py --resize --no-timers` to repeat
+resize/idle cycles and measure per-Shell allocated/resident VRAM and GTT through
+the same deduplicated DRM clients. Allow about two minutes for all three modes.
+The final GC is a diagnostic in the private Shell only; no production GC is added.
+See [the reproduction, fix and measured memory plateau](resize-memory.md).

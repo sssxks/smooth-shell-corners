@@ -174,6 +174,9 @@ shadow_spread_program = ctx.program(
     }""",
 )
 shadow_spread_vao = ctx.vertex_array(shadow_spread_program, [])
+for program in [shadow_spread_program, shadow_blur_program]:
+    program['effectShadowTextureScale'].value = (1, 1)
+    program['effectShadowTextureBounds'].value = (0, 0, 1, 1)
 
 
 def render_shadow(pixels, values, size=64, work_size=64, spread=0, blur_step=0, rect_size=64):
@@ -256,7 +259,9 @@ class ShadowRegressions(unittest.TestCase):
         pixels = np.random.default_rng(43).integers(0, 256, (size, size), dtype=np.uint8)
         pixels[10:30, 10:30] = 255
         pixels[35:55, 35:55] = 0
-        source = ctx.texture((size, size), 4, np.repeat(pixels[:, :, None], 4, axis=2).tobytes())
+        capacity = size + 29
+        padded = np.pad(pixels, ((0, 29), (0, 29)), constant_values=173)
+        source = ctx.texture((capacity, capacity), 4, np.repeat(padded[:, :, None], 4, axis=2).tobytes())
         source.filter = (moderngl.LINEAR, moderngl.LINEAR)
         source.repeat_x = source.repeat_y = False
         target = ctx.simple_framebuffer((size, size), components=4)
@@ -266,6 +271,9 @@ class ShadowRegressions(unittest.TestCase):
                     with self.subTest(radius=radius, axis=axis):
                         target.use()
                         source.use(location=0)
+                        shadow_spread_program['effectShadowTextureScale'].value = (size/capacity, size/capacity)
+                        shadow_spread_program['effectShadowTextureBounds'].value = (
+                            .5/capacity, .5/capacity, (size-.5)/capacity, (size-.5)/capacity)
                         shadow_spread_program['effectShadowSpreadUvStep'].value = step
                         shadow_spread_program['effectShadowSpreadPixels'].value = radius
                         shadow_spread_vao.render(vertices=3)
@@ -288,13 +296,18 @@ class ShadowRegressions(unittest.TestCase):
         finally:
             target.release()
             source.release()
+            for program in [shadow_spread_program, shadow_blur_program]:
+                program['effectShadowTextureScale'].value = (1, 1)
+                program['effectShadowTextureBounds'].value = (0, 0, 1, 1)
 
     def test_paired_blur_matches_discrete_gaussian(self):
         # An independent CPU convolution checks the optimized GPU filter,
         # including fractional radii, odd/even support and clamped borders.
         size = 67
         pixels = np.random.default_rng(42).integers(0, 256, (size, size), dtype=np.uint8)
-        source = ctx.texture((size, size), 4, np.repeat(pixels[:, :, None], 4, axis=2).tobytes())
+        capacity = size + 29
+        padded = np.pad(pixels, ((0, 29), (0, 29)), constant_values=173)
+        source = ctx.texture((capacity, capacity), 4, np.repeat(padded[:, :, None], 4, axis=2).tobytes())
         source.filter = (moderngl.LINEAR, moderngl.LINEAR)
         source.repeat_x = source.repeat_y = False
         target = ctx.simple_framebuffer((size, size), components=4)
@@ -304,6 +317,9 @@ class ShadowRegressions(unittest.TestCase):
                     with self.subTest(radius=radius, axis=axis):
                         target.use()
                         source.use(location=0)
+                        shadow_blur_program['effectShadowTextureScale'].value = (size/capacity, size/capacity)
+                        shadow_blur_program['effectShadowTextureBounds'].value = (
+                            .5/capacity, .5/capacity, (size-.5)/capacity, (size-.5)/capacity)
                         shadow_blur_program['effectShadowBlurUvStep'].value = step
                         shadow_blur_program['effectShadowBlurPixels'].value = radius
                         shadow_blur_vao.render(vertices=3)
@@ -316,6 +332,9 @@ class ShadowRegressions(unittest.TestCase):
         finally:
             target.release()
             source.release()
+            for program in [shadow_spread_program, shadow_blur_program]:
+                program['effectShadowTextureScale'].value = (1, 1)
+                program['effectShadowTextureBounds'].value = (0, 0, 1, 1)
 
     def test_increasing_blur_does_not_shrink_exterior_shadow(self):
         pixels = bytes([0, 0, 0, 255]) * 64 * 64

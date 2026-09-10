@@ -145,6 +145,13 @@ export const EFFECT_SHADOW_MASK_CODE = /* glsl */`
 export const EFFECT_SHADOW_SPREAD_DECLARATIONS = /* glsl */`
 uniform vec2 effectShadowSpreadUvStep;
 uniform float effectShadowSpreadPixels;
+uniform vec2 effectShadowTextureScale;
+uniform vec4 effectShadowTextureBounds;
+
+float effectShadowSample(vec2 uv) {
+    return texture2D(cogl_sampler0, clamp(uv * effectShadowTextureScale,
+        effectShadowTextureBounds.xy, effectShadowTextureBounds.zw)).a;
+}
 `;
 
 export const EFFECT_SHADOW_SPREAD_CODE = /* glsl */`
@@ -156,7 +163,7 @@ export const EFFECT_SHADOW_SPREAD_CODE = /* glsl */`
             clamp(float(tap), -radius, radius);
         float sampleAlpha = 0.0;
         if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0)
-            sampleAlpha = texture2D(cogl_sampler0, uv).a;
+            sampleAlpha = effectShadowSample(uv);
         alpha = effectShadowSpreadPixels > 0.0
             ? max(alpha, sampleAlpha) : min(alpha, sampleAlpha);
         // Alpha is bounded by [0, 1]. Once the extremum is reached,
@@ -171,6 +178,13 @@ export const EFFECT_SHADOW_SPREAD_CODE = /* glsl */`
 export const EFFECT_SHADOW_BLUR_DECLARATIONS = /* glsl */`
 uniform vec2 effectShadowBlurUvStep;
 uniform float effectShadowBlurPixels;
+uniform vec2 effectShadowTextureScale;
+uniform vec4 effectShadowTextureBounds;
+
+float effectShadowSample(vec2 uv) {
+    return texture2D(cogl_sampler0, clamp(uv * effectShadowTextureScale,
+        effectShadowTextureBounds.xy, effectShadowTextureBounds.zw)).a;
+}
 
 float effectGaussianWeight(int tap) {
     float x = float(tap) * 4.0 / effectShadowBlurPixels;
@@ -180,9 +194,9 @@ float effectGaussianWeight(int tap) {
 
 export const EFFECT_SHADOW_BLUR_CODE = /* glsl */`
     if (effectShadowBlurUvStep == vec2(0.0)) {
-        cogl_color_out = texture2D(cogl_sampler0, cogl_tex_coord_in[0].xy);
+        cogl_color_out = vec4(effectShadowSample(cogl_tex_coord_in[0].xy));
     } else {
-        float alpha = texture2D(cogl_sampler0, cogl_tex_coord_in[0].xy).a;
+        float alpha = effectShadowSample(cogl_tex_coord_in[0].xy);
         float total = 1.0;
         int radius = int(ceil(effectShadowBlurPixels));
         // Linear filtering combines two adjacent weighted texels in one
@@ -193,8 +207,8 @@ export const EFFECT_SHADOW_BLUR_CODE = /* glsl */`
             float weight = first + second;
             if (weight == 0.0) break;
             vec2 offset = (float(tap) + second / weight) * effectShadowBlurUvStep;
-            alpha += (texture2D(cogl_sampler0, cogl_tex_coord_in[0].xy - offset).a +
-                      texture2D(cogl_sampler0, cogl_tex_coord_in[0].xy + offset).a) * weight;
+            alpha += (effectShadowSample(cogl_tex_coord_in[0].xy - offset) +
+                      effectShadowSample(cogl_tex_coord_in[0].xy + offset)) * weight;
             total += 2.0 * weight;
         }
         alpha /= total;

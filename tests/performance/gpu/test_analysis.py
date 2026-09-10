@@ -59,12 +59,15 @@ class Accounting(unittest.TestCase):
             self.assertIsNone(profile.analyze(trace, records, samples)[0]['gpu_ms_per_frame'])
 
     def test_duplicate_fds_do_not_double_count_gpu_time(self):
-        text = 'drm-pdev: 0000:03:00.0\ndrm-client-id: 7\ndrm-engine-gfx: 123 ns\n'
+        text = 'drm-pdev: 0000:03:00.0\ndrm-client-id: 7\ndrm-engine-gfx: 123 ns\ndrm-memory-vram: 2048 KiB\ndrm-resident-vram: 1024 KiB\n'
         fds = [SimpleNamespace(read_text=lambda: text), SimpleNamespace(read_text=lambda: text),
                SimpleNamespace(read_text=lambda: text.replace('03:00.0', '12:00.0')),
                SimpleNamespace(read_text=lambda: 'drm-pdev: 0000:03:00.0\ndrm-client-id: 9\n')]
         with patch.object(profile, 'Path', return_value=SimpleNamespace(iterdir=lambda: fds)):
-            self.assertEqual(profile.engines(1)['gfx_ns'], 123)
+            sample = profile.engines(1)
+            self.assertEqual(sample['gfx_ns'], 123)
+            self.assertEqual(sample['memory-vram'], 2**21)
+            self.assertEqual(sample['resident-vram'], 2**20)
 
 
 if __name__ == '__main__':

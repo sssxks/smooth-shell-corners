@@ -1,3 +1,4 @@
+import System from 'system';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -67,10 +68,18 @@ export default class Probe {
             if (rect.width !== 1000 || rect.height !== 650) throw new Error('Unexpected window size');
         }
         const records = [];
-        for (const workload of ['idle', 'move', 'damage', 'damage-all']) {
+        const workloads = GLib.getenv('SSC_GPU_RESIZE') === '1'
+            ? ['idle', 'resize-1', 'rest-1', 'resize-2', 'rest-2', 'gc']
+            : ['idle', 'move', 'damage', 'damage-all'];
+        for (const workload of workloads) {
+            if (workload === 'gc') System.gc();
             let timer = 0, tick = 0;
-            if (workload !== 'idle') timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 16, () => {
-                if (workload === 'move') actors[0].metaWindow.move_frame(false, 30 + (tick++ % 100), 40);
+            if (workload.startsWith('resize') || ['move', 'damage', 'damage-all'].includes(workload)) timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 16, () => {
+                if (workload.startsWith('resize')) {
+                    actors[0].metaWindow.move_resize_frame(false, 30, 40,
+                        800 + (tick % 120)*4, 500 + (tick % 100)*3);
+                    tick++;
+                } else if (workload === 'move') actors[0].metaWindow.move_frame(false, 30 + (tick++ % 100), 40);
                 else if (workload === 'damage-all') actors.forEach(a => a.queue_redraw());
                 else actors[0].queue_redraw();
                 return GLib.SOURCE_CONTINUE;
@@ -82,6 +91,8 @@ export default class Probe {
             const end = GLib.get_monotonic_time() * 1000;
             records.push({mode, workload, start, end, frames: this.frameTimes});
             if (timer) GLib.source_remove(timer);
+            if (workload.startsWith('resize'))
+                actors[0].metaWindow.move_resize_frame(false, 30, 40, 1000, 650);
         }
         // Drain outstanding asynchronous GPU queries outside all timed spans.
         for (let i = 0; i < 4; i++) {global.stage.queue_redraw(); await sleep(100);}

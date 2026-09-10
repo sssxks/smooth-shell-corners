@@ -121,6 +121,7 @@ class PaintNode {
     children = [];
     add_child(child) { this.children.push(child); }
     add_rectangle() {}
+    add_texture_rectangle() {}
     paint(context) { this.children.forEach(child => child.paint(context)); }
 }
 const paintClutter = {
@@ -140,7 +141,7 @@ const paintClutter = {
 };
 const paintCogl = {
     ...Cogl,
-    Texture2D: {new_with_size: (_context, width, height) => ({width, height, revision: null})},
+    Texture2D: {new_with_size: (_context, width, height) => ({width, height, revision: null, get_width: () => width, get_height: () => height})},
     Offscreen: {new_with_texture: texture => ({
         texture, allocate() {}, get_texture: () => texture,
         get_width: () => texture.width, get_height: () => texture.height,
@@ -154,7 +155,7 @@ const PaintEffect = vm.runInNewContext(`${source}\nRoundedCornersEffect`, {
     FILL_DECLARATIONS, FILL_CODE, ROUNDED_DECLARATIONS, ROUNDED_CODE,
 });
 
-for (const scenario of ['first paint', 'content update', 'resize', 'cached repaint', 'pixel phase', 'scale', 'GPU purge', 'disabled update']) {
+for (const scenario of ['first paint', 'content update', 'resize', 'resize grows', 'resize shrinks', 'cached repaint', 'pixel phase', 'scale', 'GPU purge', 'disabled update']) {
     test(`shadow reads current rendered content on ${scenario}`, () => {
         const fx = new PaintEffect();
         let purge;
@@ -165,6 +166,7 @@ for (const scenario of ['first paint', 'content update', 'resize', 'cached repai
             get_transformed_position: () => [0, 0], is_in_clone_paint: () => false,
             get_paint_opacity: () => 255,
         });
+        if (scenario === 'resize shrinks') fx.actor.get_width = () => 300;
         fx._pipeline = {set_layer_texture() {}, set_layer_null_texture() {}, set_color() {}, set_uniform_float() {}};
         fx._shadowEnabled = true;
         fx._shadowPipeline = {set_layer_texture() {}, set_layer_null_texture() {}, set_uniform_float() {}};
@@ -178,9 +180,11 @@ for (const scenario of ['first paint', 'content update', 'resize', 'cached repai
             root.paint({});
         };
         paint(1);
+        const originalFramebuffer = fx._framebuffer;
         if (scenario !== 'first paint') {
             if (scenario !== 'cached repaint') fx.actor.revision = 2;
-            if (scenario === 'resize') fx.actor.get_width = () => 120;
+            if (scenario.startsWith('resize'))
+                fx.actor.get_width = () => scenario === 'resize grows' ? 300 : scenario === 'resize shrinks' ? 100 : 120;
             if (scenario === 'pixel phase') fx.actor.get_transformed_position = () => [0.5, 0];
             if (scenario === 'scale') fx._paintScale = 1.5;
             if (scenario === 'GPU purge') purge();
@@ -191,6 +195,10 @@ for (const scenario of ['first paint', 'content update', 'resize', 'cached repai
             }
             paint(scenario === 'content update' ? 1 : 0);
         }
+        if (scenario === 'resize') assert.equal(fx._framebuffer, originalFramebuffer);
+        if (scenario === 'resize grows' || scenario === 'resize shrinks')
+            assert.notEqual(fx._framebuffer, originalFramebuffer);
+        if (scenario === 'resize shrinks') assert.equal(fx._framebuffer.get_width(), 128);
         assert.equal(revisions.at(-1), fx.actor.revision);
         assert.equal(revisions.length, scenario === 'first paint' || scenario === 'cached repaint' ? 1 : 2);
         assert.equal(fx.actor.paintCount, scenario === 'first paint' || scenario === 'cached repaint' ? 1 : 2);

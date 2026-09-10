@@ -41,10 +41,15 @@ def engines(pid):
             continue
         if info.get('drm-pdev', '').strip() != '0000:03:00.0' or 'drm-engine-gfx' not in info:
             continue
-        clients[info['drm-client-id'].strip()] = int(info['drm-engine-gfx'].split()[0])
+        clients[info['drm-client-id'].strip()] = {
+            'gfx_ns': int(info['drm-engine-gfx'].split()[0]),
+            **{key: int(info.get('drm-'+key, '0 KiB').split()[0])*1024
+               for key in ['memory-vram', 'resident-vram', 'memory-gtt']},
+        }
     if not clients:
         raise RuntimeError('No RX 7900 XT graphics-engine counters for private Shell')
-    return {'time': time.monotonic_ns(), 'gfx_ns': sum(clients.values())}
+    return {'time': time.monotonic_ns(), **{key: sum(client[key] for client in clients.values())
+                                        for key in ['gfx_ns', 'memory-vram', 'resident-vram', 'memory-gtt']}}
 
 
 def analyze(trace, records, samples):
@@ -70,6 +75,10 @@ def analyze(trace, records, samples):
         passes = {label: {'calls': len(values), 'gpu_ms': sum(v[0] for v in values)/1e6,
                           'mean_us': sum(v[0] for v in values)/len(values)/1e3,
                           'max_target': max((v[1], v[2]) for v in values)} for label, values in groups.items()}
+        memory = {key: {'start_mib': counters[0].get(key, 0)/2**20,
+                        'end_mib': counters[-1].get(key, 0)/2**20,
+                        'peak_mib': max(s.get(key, 0) for s in counters)/2**20}
+                  for key in ['memory-vram', 'resident-vram', 'memory-gtt']}
         active_ms = sorted(ns/1e6 for ns in frame_ns.values())
         results.append({**record, 'frames': len(frames), 'gfx_busy_percent': busy,
                         'gpu_ms_per_frame': sum(r[2] for r in selected)/1e6/max(1, len(frames)) if trace.exists() else None,
@@ -77,7 +86,7 @@ def analyze(trace, records, samples):
                         'gpu_ms_per_rendered_frame_p95': active_ms[math.ceil(.95*len(active_ms))-1] if active_ms else None,
                         'frames_with_gpu_commands': len(frame_ns) if trace.exists() else None,
                         'gpu_ms_per_second': sum(r[2] for r in selected)/(end-start)*1000 if trace.exists() else None,
-                        'passes': passes})
+                        'passes': passes, 'memory': memory})
     return results
 
 
@@ -86,6 +95,7 @@ def main():
     parser.add_argument('--checkout', type=Path, default=repo)
     parser.add_argument('--modes', nargs='+', choices=['off', 'corners', 'shadows'], default=['off', 'corners', 'shadows'])
     parser.add_argument('--no-timers', action='store_true', help='Measure instrumentation overhead using DRM counters')
+    parser.add_argument('--resize', action='store_true', help='Repeat resize and idle spans, then diagnostic GC')
     args = parser.parse_args()
     checkout = args.checkout.resolve()
     signal.signal(signal.SIGTERM, interrupt)
@@ -112,6 +122,7 @@ def main():
         root = Path(temporary)
         env = os.environ | {'GSETTINGS_BACKEND': 'keyfile', 'DISPLAY': '', 'WAYLAND_DISPLAY': 'ssc-gpu',
                            'GDK_BACKEND': 'wayland', 'SSC_GPU_CHECKOUT': str(checkout),
+                           'SSC_GPU_RESIZE': '1' if args.resize else '0',
                            'SSC_GPU_TRACE': str(output/'draws.csv')}
         for key, name in [('XDG_CONFIG_HOME', 'config'), ('XDG_DATA_HOME', 'data'),
                           ('XDG_CACHE_HOME', 'cache'), ('XDG_RUNTIME_DIR', 'runtime')]:
@@ -159,7 +170,9 @@ def main():
             for mode in args.modes:
                 print(f'Measuring {mode}', flush=True)
                 evaluate(f'global.sscGpu.start({json.dumps(mode)})')
-                deadline = time.monotonic()+23
+                if args.resize and engines(pid)['memory-vram'] == 0:
+                    raise RuntimeError('Missing Shell VRAM accounting')
+                deadline = time.monotonic()+(33 if args.resize else 23)
                 while time.monotonic() < deadline:
                     samples.append(engines(pid))
                     time.sleep(.25)
@@ -173,6 +186,10 @@ def main():
                               else "no timed frames" if not args.no_timers else "timers disabled")
                     print(f"  {r['workload']:6}: gfx {r['gfx_busy_percent']:.1f}%, "
                           f"{r['frames']} paint callbacks, GPU commands {timing}", flush=True)
+                    if args.resize:
+                        memory = r['memory']['memory-vram']
+                        print(f"    VRAM MiB: start {memory['start_mib']:.1f}, "
+                              f"peak {memory['peak_mib']:.1f}, end {memory['end_mib']:.1f}", flush=True)
             log = (root/'cache/shell.log').read_text()
             if 'JS ERROR' in log or 'GPU timer:' in log and 'timestamp_bits=' not in log:
                 raise RuntimeError('Shell/tracer error; inspect shell.log')
