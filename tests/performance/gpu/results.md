@@ -115,3 +115,22 @@ test was started around its completion; the following captures ran in isolation:
 
 These artifacts were taken with the cache changes uncommitted; their archived
 extension and source status identify the measured build.
+
+## Optimization 2: stop spread at its exact extremum
+
+Dilation stops at alpha 1 and erosion at alpha 0: remaining samples cannot
+change the answer. This preserves arbitrary silhouettes and the fractional
+spread samples. No quality or customization tradeoff.
+
+GPU commands fell to **0.926 ms/rendered damage frame**, with spread down
+from 0.347 to **0.218 ms**. Uninstrumented engine use was **6.3%** (move 6.4%).
+The gain depends on alpha content and spread sign; fully opaque interiors
+still need all samples during erosion.
+
+An independent CPU max/min reference covers both axes, fractional and signed
+radii, opaque/transparent regions, random alpha and outside-texture sampling.
+It passes within one alpha quantization level, alongside Gaussian, monotonic
+blur, existing shader tests, Node checks and full compositor tests.
+
+- [Spread timestamps](../../artifacts/gpu/20260910-214729-c46ff00a4c/results.json)
+- [Spread without timers](../../artifacts/gpu/20260910-214752-c46ff00a4c/results.json)

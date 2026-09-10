@@ -249,6 +249,46 @@ print('Opaque silhouette blur is monotonic and free of sparse-sampling steps.')
 # rather than only an opaque rectangle that hides incorrect spread/fill.
 
 class ShadowRegressions(unittest.TestCase):
+    def test_spread_matches_full_cpu_extremum(self):
+        # Exact UV fractions keep half-texel border cases independent of
+        # raster interpolation roundoff; the reference includes outside-zero.
+        size = 64
+        pixels = np.random.default_rng(43).integers(0, 256, (size, size), dtype=np.uint8)
+        pixels[10:30, 10:30] = 255
+        pixels[35:55, 35:55] = 0
+        source = ctx.texture((size, size), 4, np.repeat(pixels[:, :, None], 4, axis=2).tobytes())
+        source.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        source.repeat_x = source.repeat_y = False
+        target = ctx.simple_framebuffer((size, size), components=4)
+        try:
+            for radius in [-80, -12, -3.5, -0.5, 0.5, 3.5, 12, 80]:
+                for axis, step in [(0, (0, 1/size)), (1, (1/size, 0))]:
+                    with self.subTest(radius=radius, axis=axis):
+                        target.use()
+                        source.use(location=0)
+                        shadow_spread_program['effectShadowSpreadUvStep'].value = step
+                        shadow_spread_program['effectShadowSpreadPixels'].value = radius
+                        shadow_spread_vao.render(vertices=3)
+                        actual = np.frombuffer(target.read(components=4), dtype=np.uint8).reshape(size, size, 4)[:, :, 3]
+                        samples = []
+                        for tap in range(-int(np.ceil(abs(radius))), int(np.ceil(abs(radius)))+1):
+                            pos = np.arange(size) + np.clip(tap, -abs(radius), abs(radius))
+                            left = np.floor(pos).astype(int)
+                            fraction = (pos-left).reshape((-1, 1) if axis == 0 else (1, -1))
+                            sample = (1-fraction) * np.take(pixels, np.clip(left, 0, size-1), axis=axis)
+                            sample += fraction * np.take(pixels, np.clip(left+1, 0, size-1), axis=axis)
+                            outside = (pos < -0.5) | (pos > size-0.5)
+                            if axis == 0:
+                                sample[outside, :] = 0
+                            else:
+                                sample[:, outside] = 0
+                            samples.append(sample)
+                        expected = (np.maximum if radius > 0 else np.minimum).reduce(samples)
+                        self.assertLessEqual(float(np.abs(actual.astype(float)-expected).max()), 1.0)
+        finally:
+            target.release()
+            source.release()
+
     def test_paired_blur_matches_discrete_gaussian(self):
         # An independent CPU convolution checks the optimized GPU filter,
         # including fractional radii, odd/even support and clamped borders.

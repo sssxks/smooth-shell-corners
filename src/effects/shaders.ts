@@ -159,6 +159,10 @@ export const EFFECT_SHADOW_SPREAD_CODE = /* glsl */`
             sampleAlpha = texture2D(cogl_sampler0, uv).a;
         alpha = effectShadowSpreadPixels > 0.0
             ? max(alpha, sampleAlpha) : min(alpha, sampleAlpha);
+        // Alpha is bounded by [0, 1]. Once the extremum is reached,
+        // remaining samples cannot change it, even for shaped windows.
+        if (alpha == (effectShadowSpreadPixels > 0.0 ? 1.0 : 0.0))
+            break;
     }
     cogl_color_out = vec4(alpha);
 `;
