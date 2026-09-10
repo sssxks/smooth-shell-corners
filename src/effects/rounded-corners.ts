@@ -17,6 +17,8 @@ import {
     EFFECT_SHADOW_DECLARATIONS,
     EFFECT_SHADOW_MASK_CODE,
     EFFECT_SHADOW_MASK_DECLARATIONS,
+    EFFECT_SHADOW_SPREAD_CODE,
+    EFFECT_SHADOW_SPREAD_DECLARATIONS,
 } from './shaders.js';
 
 const SHADOW_PADDING = 80;
@@ -48,13 +50,14 @@ export const RoundedCornersEffect = GObject.registerClass(
         _shadowBlur = 0;
         _shadowSpread = 0;
         _shadowOffset: [number, number] = [0, 0];
-        _shadowSourceSize: [number, number] = [1, 1];
         _shadowMaskPipeline: Cogl.Pipeline | null = null;
+        _shadowSpreadPipeline: Cogl.Pipeline | null = null;
         _shadowBlurPipeline: Cogl.Pipeline | null = null;
         _shadowPipeline: Cogl.Pipeline | null = null;
         _shadowMaskFramebuffer: Cogl.Offscreen | null = null;
         _shadowBlurFramebuffer: Cogl.Offscreen | null = null;
         _shadowMaskUniforms: Record<string, number> | null = null;
+        _shadowSpreadUniforms: Record<string, number> | null = null;
         _shadowBlurUniforms: Record<string, number> | null = null;
         _shadowUniforms: Record<string, number> | null = null;
 
@@ -66,11 +69,13 @@ export const RoundedCornersEffect = GObject.registerClass(
             this._pipeline = null;
             this._u = null;
             this._shadowMaskPipeline = null;
+            this._shadowSpreadPipeline = null;
             this._shadowBlurPipeline = null;
             this._shadowPipeline = null;
             this._shadowMaskFramebuffer = null;
             this._shadowBlurFramebuffer = null;
             this._shadowMaskUniforms = null;
+            this._shadowSpreadUniforms = null;
             this._shadowBlurUniforms = null;
             this._shadowUniforms = null;
             super.vfunc_set_actor(actor);
@@ -84,27 +89,6 @@ export const RoundedCornersEffect = GObject.registerClass(
             volume.set_width(volume.get_width() + 2 * pad);
             volume.set_height(volume.get_height() + 2 * pad);
             return true;
-        }
-
-        _getShadowTexture(actor: Clutter.Actor): Cogl.Texture | null {
-            const owner = actor as unknown as {get_texture?: () => unknown};
-            if (typeof owner.get_texture !== 'function') return null;
-            const shaped = owner.get_texture();
-            if (!shaped) return null;
-
-            const content = shaped as {
-                get_texture?: () => unknown;
-                get_width?: () => number;
-            };
-            if (typeof content.get_texture === 'function') {
-                const multi = content.get_texture() as {
-                    is_simple?: () => boolean;
-                    get_plane?: (index: number) => Cogl.Texture;
-                };
-                if (multi.is_simple?.() !== false && typeof multi.get_plane === 'function')
-                    return multi.get_plane(0);
-            }
-            return typeof content.get_width === 'function' ? shaped as Cogl.Texture : null;
         }
 
         override vfunc_paint(node: Clutter.PaintNode, _context: Clutter.PaintContext, flags: Clutter.EffectPaintFlags) {
@@ -126,6 +110,7 @@ export const RoundedCornersEffect = GObject.registerClass(
                     this._shadowMaskFramebuffer = null;
                     this._shadowBlurFramebuffer = null;
                     this._shadowMaskPipeline?.set_layer_null_texture(0);
+                    this._shadowSpreadPipeline?.set_layer_null_texture(0);
                     this._shadowBlurPipeline?.set_layer_null_texture(0);
                     this._shadowPipeline?.set_layer_null_texture(0);
                     this.queue_repaint();
@@ -202,7 +187,27 @@ export const RoundedCornersEffect = GObject.registerClass(
             }
 
             const framebuffer = this._framebuffer;
-            const sourceTexture = this._getShadowTexture(actor) ?? framebuffer.get_texture();
+            framebuffer.set_viewport(0, 0, width, height);
+            framebuffer.orthographic(originX, originY,
+                originX + width / scale, originY + height / scale, -1, 1);
+            framebuffer.set_modelview_matrix(new Graphene.Matrix().init_identity());
+            this._updateTextureMapping(width, height, originX, originY, scale);
+            const opacity = actor.get_paint_opacity() / 255;
+            const color = new Cogl.Color();
+            color.init_from_4f(opacity, opacity, opacity, opacity);
+            this._pipeline.set_color(color);
+
+            // Shadow sampling is immediate, so populate the source first. A
+            // layer without rectangles captures content without compositing it.
+            // This also preserves shaped/multi-plane content through Clutter.
+            if (dirty && this._shadowEnabled) {
+                const capture = Clutter.LayerNode.new_to_framebuffer(framebuffer, this._pipeline);
+                capture.add_child(Clutter.ActorNode.new(actor, 255));
+                capture.paint(_context);
+                dirty = false;
+            }
+
+            const sourceTexture = framebuffer.get_texture();
             if (this._shadowEnabled && sourceTexture && this._shadowPipeline && this._shadowUniforms) {
                 const pad = SHADOW_PADDING;
                 const u = this._shadowUniforms;
@@ -217,16 +222,6 @@ export const RoundedCornersEffect = GObject.registerClass(
                     node.add_child(shadow);
                 }
             }
-
-            framebuffer.set_viewport(0, 0, width, height);
-            framebuffer.orthographic(originX, originY,
-                originX + width / scale, originY + height / scale, -1, 1);
-            framebuffer.set_modelview_matrix(new Graphene.Matrix().init_identity());
-            this._updateTextureMapping(width, height, originX, originY, scale);
-            const opacity = actor.get_paint_opacity() / 255;
-            const color = new Cogl.Color();
-            color.init_from_4f(opacity, opacity, opacity, opacity);
-            this._pipeline.set_color(color);
 
             // Render content at full opacity and modulate once when compositing.
             // Reuse the texture for opacity and shader-only changes. New content,
@@ -287,12 +282,21 @@ export const RoundedCornersEffect = GObject.registerClass(
             maskPipeline.add_snippet(Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT,
                 EFFECT_SHADOW_MASK_DECLARATIONS, EFFECT_SHADOW_MASK_CODE));
 
+            const spreadPipeline = Cogl.Pipeline.new(context);
+            spreadPipeline.set_layer_texture(0, coordinateTexture);
+            spreadPipeline.set_layer_filters(0, Cogl.PipelineFilter.LINEAR, Cogl.PipelineFilter.LINEAR);
+            spreadPipeline.set_layer_wrap_mode(0, Cogl.PipelineWrapMode.CLAMP_TO_EDGE);
+            spreadPipeline.set_color(color);
+            spreadPipeline.set_blend('RGBA = ADD (SRC_COLOR, 0)');
+            spreadPipeline.add_snippet(Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT,
+                EFFECT_SHADOW_SPREAD_DECLARATIONS, EFFECT_SHADOW_SPREAD_CODE));
+
             const blurPipeline = Cogl.Pipeline.new(context);
             blurPipeline.set_layer_texture(0, coordinateTexture);
             blurPipeline.set_layer_filters(0, Cogl.PipelineFilter.LINEAR, Cogl.PipelineFilter.LINEAR);
             blurPipeline.set_layer_wrap_mode(0, Cogl.PipelineWrapMode.CLAMP_TO_EDGE);
             blurPipeline.set_color(color);
-            blurPipeline.set_blend('RGBA = ADD (SRC_COLOR, DST_COLOR * (1-SRC_COLOR[A]))');
+            blurPipeline.set_blend('RGBA = ADD (SRC_COLOR, 0)');
             blurPipeline.add_snippet(Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT,
                 EFFECT_SHADOW_BLUR_DECLARATIONS, EFFECT_SHADOW_BLUR_CODE));
 
@@ -307,18 +311,24 @@ export const RoundedCornersEffect = GObject.registerClass(
                 EFFECT_SHADOW_DECLARATIONS, EFFECT_SHADOW_CODE));
 
             this._shadowMaskPipeline = maskPipeline;
+            this._shadowSpreadPipeline = spreadPipeline;
             this._shadowBlurPipeline = blurPipeline;
             this._shadowPipeline = pipeline;
             this._shadowMaskUniforms = {
                 effectShadowHole: maskPipeline.get_uniform_location('effectShadowHole'),
                 effectShadowHoleRadius: maskPipeline.get_uniform_location('effectShadowHoleRadius'),
                 effectShadowExp: maskPipeline.get_uniform_location('effectShadowExp'),
-                effectShadowSpread: maskPipeline.get_uniform_location('effectShadowSpread'),
+                fillPadding: maskPipeline.get_uniform_location('fillPadding'),
+                sampleBounds: maskPipeline.get_uniform_location('sampleBounds'),
+                pixelStep: maskPipeline.get_uniform_location('pixelStep'),
+                textureOrigin: maskPipeline.get_uniform_location('textureOrigin'),
                 effectShadowOffset: maskPipeline.get_uniform_location('effectShadowOffset'),
-                effectShadowSourceSize: maskPipeline.get_uniform_location('effectShadowSourceSize'),
-                effectShadowBlurStep: maskPipeline.get_uniform_location('effectShadowBlurStep'),
                 effectShadowRectOrigin: maskPipeline.get_uniform_location('effectShadowRectOrigin'),
                 effectShadowRectSize: maskPipeline.get_uniform_location('effectShadowRectSize'),
+            };
+            this._shadowSpreadUniforms = {
+                step: spreadPipeline.get_uniform_location('effectShadowSpreadUvStep'),
+                pixels: spreadPipeline.get_uniform_location('effectShadowSpreadPixels'),
             };
             this._shadowBlurUniforms = {
                 effectShadowBlurUvStep: blurPipeline.get_uniform_location('effectShadowBlurUvStep'),
@@ -331,9 +341,12 @@ export const RoundedCornersEffect = GObject.registerClass(
         _renderShadowTexture(sourceTexture: Cogl.Texture, scale: number): Cogl.Texture | null {
             const maskPipeline = this._shadowMaskPipeline;
             const blurPipeline = this._shadowBlurPipeline;
+            const spreadPipeline = this._shadowSpreadPipeline;
+            const spreadUniforms = this._shadowSpreadUniforms;
             const maskUniforms = this._shadowMaskUniforms;
             const blurUniforms = this._shadowBlurUniforms;
-            if (!maskPipeline || !blurPipeline || !maskUniforms || !blurUniforms)
+            if (!maskPipeline || !blurPipeline || !maskUniforms || !blurUniforms ||
+                !spreadPipeline || !spreadUniforms)
                 return null;
 
             const actorWidth = this.actor.get_width();
@@ -389,11 +402,7 @@ export const RoundedCornersEffect = GObject.registerClass(
             maskPipeline.set_uniform_float(maskUniforms.effectShadowHoleRadius, 1, 1,
                 [this._shadowHoleRadius]);
             maskPipeline.set_uniform_float(maskUniforms.effectShadowExp, 1, 1, [this._shadowExponent]);
-            maskPipeline.set_uniform_float(maskUniforms.effectShadowSpread, 1, 1, [this._shadowSpread]);
             maskPipeline.set_uniform_float(maskUniforms.effectShadowOffset, 2, 1, this._shadowOffset);
-            maskPipeline.set_uniform_float(maskUniforms.effectShadowSourceSize, 2, 1,
-                this._shadowSourceSize);
-            maskPipeline.set_uniform_float(maskUniforms.effectShadowBlurStep, 1, 1, [blurStep]);
             maskPipeline.set_uniform_float(maskUniforms.effectShadowRectOrigin, 2, 1,
                 [-SHADOW_PADDING, -SHADOW_PADDING]);
             maskPipeline.set_uniform_float(maskUniforms.effectShadowRectSize, 2, 1,
@@ -401,15 +410,35 @@ export const RoundedCornersEffect = GObject.registerClass(
             maskFramebuffer.draw_rectangle(maskPipeline, -SHADOW_PADDING, -SHADOW_PADDING,
                 actorWidth + SHADOW_PADDING, actorHeight + SHADOW_PADDING);
 
-            if (blurStep <= 0)
-                return maskFramebuffer.get_texture();
-
-            blurPipeline.set_layer_texture(0, maskFramebuffer.get_texture());
-            blurPipeline.set_uniform_float(blurUniforms.effectShadowBlurUvStep, 2, 1,
-                [blurStep / rectWidth, blurStep / rectHeight]);
-            blurFramebuffer.draw_rectangle(blurPipeline, -SHADOW_PADDING, -SHADOW_PADDING,
-                actorWidth + SHADOW_PADDING, actorHeight + SHADOW_PADDING);
-            return blurFramebuffer.get_texture();
+            // Ping-pong both filters through the existing pair of targets.
+            // Overwrite blending is required because each target is reused.
+            if (this._shadowSpread !== 0) {
+                spreadPipeline.set_layer_texture(0, maskFramebuffer.get_texture());
+                spreadPipeline.set_uniform_float(spreadUniforms.step, 2, 1, [1 / width, 0]);
+                spreadPipeline.set_uniform_float(spreadUniforms.pixels, 1, 1,
+                    [this._shadowSpread * width / rectWidth]);
+                blurFramebuffer.draw_rectangle(spreadPipeline, -SHADOW_PADDING, -SHADOW_PADDING,
+                    actorWidth + SHADOW_PADDING, actorHeight + SHADOW_PADDING);
+                spreadPipeline.set_layer_texture(0, blurFramebuffer.get_texture());
+                spreadPipeline.set_uniform_float(spreadUniforms.step, 2, 1, [0, 1 / height]);
+                spreadPipeline.set_uniform_float(spreadUniforms.pixels, 1, 1,
+                    [this._shadowSpread * height / rectHeight]);
+                maskFramebuffer.draw_rectangle(spreadPipeline, -SHADOW_PADDING, -SHADOW_PADDING,
+                    actorWidth + SHADOW_PADDING, actorHeight + SHADOW_PADDING);
+            }
+            if (blurStep > 0) {
+                blurPipeline.set_layer_texture(0, maskFramebuffer.get_texture());
+                blurPipeline.set_uniform_float(blurUniforms.effectShadowBlurUvStep, 2, 1,
+                    [blurStep / rectWidth, 0]);
+                blurFramebuffer.draw_rectangle(blurPipeline, -SHADOW_PADDING, -SHADOW_PADDING,
+                    actorWidth + SHADOW_PADDING, actorHeight + SHADOW_PADDING);
+                blurPipeline.set_layer_texture(0, blurFramebuffer.get_texture());
+                blurPipeline.set_uniform_float(blurUniforms.effectShadowBlurUvStep, 2, 1,
+                    [0, blurStep / rectHeight]);
+                maskFramebuffer.draw_rectangle(blurPipeline, -SHADOW_PADDING, -SHADOW_PADDING,
+                    actorWidth + SHADOW_PADDING, actorHeight + SHADOW_PADDING);
+            }
+            return maskFramebuffer.get_texture();
         }
 
         /**
@@ -471,11 +500,13 @@ export const RoundedCornersEffect = GObject.registerClass(
                 this._shadowBlur = blur;
                 this._shadowSpread = shadow.spread * scaleFactor;
                 this._shadowOffset = [shadow.xOffset * scaleFactor, shadow.yOffset * scaleFactor];
-                this._shadowSourceSize = [actorW, actorH];
             }
             shadowActor.invalidate_paint_volume?.();
 
             pipeline.set_uniform_float(u.fillPadding, 1, 1, [cfg.fillPadding ? 1 : 0]);
+            if (this._shadowMaskPipeline && this._shadowMaskUniforms)
+                this._shadowMaskPipeline.set_uniform_float(this._shadowMaskUniforms.fillPadding,
+                    1, 1, [cfg.fillPadding ? 1 : 0]);
             pipeline.set_uniform_float(u.bounds, 4, 1, b);
             pipeline.set_uniform_float(u.clipRadius, 1, 1, [radius]);
             pipeline.set_uniform_float(u.borderWidth, 1, 1, [bw]);
@@ -511,6 +542,13 @@ export const RoundedCornersEffect = GObject.registerClass(
             pipeline.set_uniform_float(u.pixelStep, 2, 1, [scale / width, scale / height]);
             pipeline.set_uniform_float(u.textureOrigin, 2, 1, [originX, originY]);
             pipeline.set_uniform_float(u.sampleBounds, 4, 1, sampleBounds);
+            if (this._shadowMaskPipeline && this._shadowMaskUniforms) {
+                const mask = this._shadowMaskPipeline;
+                const mu = this._shadowMaskUniforms;
+                mask.set_uniform_float(mu.pixelStep, 2, 1, [scale / width, scale / height]);
+                mask.set_uniform_float(mu.textureOrigin, 2, 1, [originX, originY]);
+                mask.set_uniform_float(mu.sampleBounds, 4, 1, sampleBounds);
+            }
         }
     },
 );

@@ -1,4 +1,3 @@
-import Cogl from 'gi://Cogl';
 import St from 'gi://St';
 import {readConfig} from '../../dist/settings/config.js';
 import {computeBounds} from '../../dist/shell/window-geometry.js';
@@ -25,11 +24,6 @@ export function shadowFixture(fill, blur, spread, xOffset, yOffset, scale) {
         get_double: key => values[key] ?? 0, get_boolean: key => values[key] ?? false};
     global.windowGroup.add_child(background);
     global.windowGroup.add_child(actor);
-    const context = actor.get_context().get_backend().get_cogl_context();
-    const pixels = new Uint8Array(actor.width * actor.height * 4).fill(255);
-    const sourceTexture = Cogl.Texture2D.new_from_data(context, actor.width, actor.height,
-        Cogl.PixelFormat.RGBA_8888_PRE, actor.width * 4, pixels);
-    actor.get_texture = () => sourceTexture;
     const config = readConfig(settings);
     const effect = new RoundedCornersEffect();
     actor.add_effect(effect);

@@ -76,18 +76,17 @@ export const ROUNDED_CODE = /* glsl */`
     }
 `;
 
-// Rasterize a hard window silhouette and convolve it horizontally. The
-// intermediate target is deliberately downsampled for wide shadows, keeping
-// the fixed kernel dense in texture space instead of leaving visible gaps
-// between a handful of samples in window space.
+// Rasterize the visible alpha silhouette before spread and blur. Share the
+// window texture mapping so filled padding casts the same shadow as content.
 export const EFFECT_SHADOW_MASK_DECLARATIONS = /* glsl */`
 uniform vec4  effectShadowHole;
 uniform float effectShadowHoleRadius;
 uniform float effectShadowExp;
-uniform float effectShadowSpread;
 uniform vec2  effectShadowOffset;
-uniform vec2  effectShadowSourceSize;
-uniform float effectShadowBlurStep;
+uniform float fillPadding;
+uniform vec4 sampleBounds;
+uniform vec2 pixelStep;
+uniform vec2 textureOrigin;
 uniform vec2  effectShadowRectOrigin;
 uniform vec2  effectShadowRectSize;
 
@@ -121,58 +120,50 @@ float effectOpacity(vec2 p, vec4 b, float r, float e) {
 }
 
 float effectOpaqueSilhouette(vec2 p) {
-    if (effectShadowSourceSize.x <= 0.0 || effectShadowSourceSize.y <= 0.0)
-        return 0.0;
-
     vec2 q = p - effectShadowOffset;
-    float spread = effectShadowSpread;
-    vec4 expanded = effectShadowHole + vec4(-spread, -spread, spread, spread);
-    float expandedRadius = max(0.0, effectShadowHoleRadius + spread);
-    float shape = effectOpacity(q, expanded, expandedRadius, effectShadowExp);
+    float shape = effectOpacity(q, effectShadowHole,
+                                effectShadowHoleRadius, effectShadowExp);
     if (shape <= 0.0)
         return 0.0;
-
-    // Positive spread extends the nearest source edge. The geometric mask
-    // above supplies the corresponding rounded/squircle outer boundary.
-    vec2 sourcePoint = spread > 0.0
-        ? clamp(q, effectShadowHole.xy, effectShadowHole.zw)
-        : q;
-    vec2 uv = sourcePoint / effectShadowSourceSize;
+    vec2 uv = (q - textureOrigin) * pixelStep;
+    if (fillPadding > 0.5)
+        uv = clamp(uv, sampleBounds.xy, sampleBounds.zw);
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
         return 0.0;
-    float coverage = texture2D(cogl_sampler0, uv).a * shape;
-    return coverage > 0.001 ? 1.0 : 0.0;
-}
-
-float effectGaussianWeight(int tap) {
-    float x = float(tap);
-    // sigma = 4 / 3; taps at +/-4 cover three standard deviations.
-    return exp(-0.28125 * x * x);
-}
-
-float effectHorizontalBlur(vec2 p) {
-    if (effectShadowBlurStep <= 0.0)
-        return effectOpaqueSilhouette(p);
-    float alpha = 0.0;
-    float total = 0.0;
-    for (int tap = -4; tap <= 4; tap++) {
-        float weight = effectGaussianWeight(tap);
-        alpha += effectOpaqueSilhouette(
-            p + vec2(float(tap) * effectShadowBlurStep, 0.0)) * weight;
-        total += weight;
-    }
-    return alpha / total;
+    return texture2D(cogl_sampler0, uv).a * shape > 0.001 ? 1.0 : 0.0;
 }
 `;
 
 export const EFFECT_SHADOW_MASK_CODE = /* glsl */`
     vec2 p = cogl_tex_coord_in[0].xy * effectShadowRectSize + effectShadowRectOrigin;
-    float alpha = effectHorizontalBlur(p);
-    cogl_color_out = vec4(alpha, alpha, alpha, alpha);
+    float alpha = effectOpaqueSilhouette(p);
+    cogl_color_out = vec4(alpha);
 `;
 
-// The second separable pass samples the horizontal intermediate. Both passes
-// use the same normalized Gaussian weights.
+// Separable max/min filters dilate/erode every alpha boundary, including holes.
+// A rectangular kernel keeps work linear in spread instead of quadratic.
+export const EFFECT_SHADOW_SPREAD_DECLARATIONS = /* glsl */`
+uniform vec2 effectShadowSpreadUvStep;
+uniform float effectShadowSpreadPixels;
+`;
+
+export const EFFECT_SHADOW_SPREAD_CODE = /* glsl */`
+    float radius = abs(effectShadowSpreadPixels);
+    float alpha = effectShadowSpreadPixels > 0.0 ? 0.0 : 1.0;
+    int taps = int(ceil(radius));
+    for (int tap = -taps; tap <= taps; tap++) {
+        vec2 uv = cogl_tex_coord_in[0].xy + effectShadowSpreadUvStep *
+            clamp(float(tap), -radius, radius);
+        float sampleAlpha = 0.0;
+        if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0)
+            sampleAlpha = texture2D(cogl_sampler0, uv).a;
+        alpha = effectShadowSpreadPixels > 0.0
+            ? max(alpha, sampleAlpha) : min(alpha, sampleAlpha);
+    }
+    cogl_color_out = vec4(alpha);
+`;
+
+// Horizontal and vertical blur use the same normalized Gaussian weights.
 export const EFFECT_SHADOW_BLUR_DECLARATIONS = /* glsl */`
 uniform vec2 effectShadowBlurUvStep;
 
@@ -183,7 +174,7 @@ float effectGaussianWeight(int tap) {
 `;
 
 export const EFFECT_SHADOW_BLUR_CODE = /* glsl */`
-    if (effectShadowBlurUvStep.y <= 0.0) {
+    if (effectShadowBlurUvStep == vec2(0.0)) {
         cogl_color_out = texture2D(cogl_sampler0, cogl_tex_coord_in[0].xy);
     } else {
         float alpha = 0.0;
@@ -191,7 +182,7 @@ export const EFFECT_SHADOW_BLUR_CODE = /* glsl */`
         for (int tap = -4; tap <= 4; tap++) {
             float weight = effectGaussianWeight(tap);
             vec2 uv = cogl_tex_coord_in[0].xy +
-                vec2(0.0, float(tap) * effectShadowBlurUvStep.y);
+                float(tap) * effectShadowBlurUvStep;
             alpha += texture2D(cogl_sampler0, uv).a * weight;
             total += weight;
         }

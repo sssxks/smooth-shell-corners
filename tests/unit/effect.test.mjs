@@ -88,3 +88,89 @@ test('oversized padding cannot invert the sample rectangle', () => {
     assert.equal(top, bottom);
     assert.ok(left > 0 && right < 1 && top > 0 && bottom < 1);
 });
+
+// Model deferred paint-node execution: constructing a LayerNode does not
+// populate its texture. Only painting its ActorNode writes current content.
+class PaintNode {
+    children = [];
+    add_child(child) { this.children.push(child); }
+    add_rectangle() {}
+    paint(context) { this.children.forEach(child => child.paint(context)); }
+}
+const paintClutter = {
+    Effect: EffectBase,
+    EffectPaintFlags: {ACTOR_DIRTY: 1, BYPASS_EFFECT: 2},
+    ActorBox: class { constructor(values) { Object.assign(this, values); } },
+    PipelineNode: {new: () => new PaintNode()},
+    ActorNode: {new: actor => ({paint(context) {
+        context.target.texture.revision = actor.revision;
+        actor.paintCount++;
+    }})},
+    LayerNode: {new_to_framebuffer: framebuffer => {
+        const node = new PaintNode();
+        node.paint = context => PaintNode.prototype.paint.call(node, {...context, target: framebuffer});
+        return node;
+    }},
+};
+const paintCogl = {
+    ...Cogl,
+    Texture2D: {new_with_size: (_context, width, height) => ({width, height, revision: null})},
+    Offscreen: {new_with_texture: texture => ({
+        texture, allocate() {}, get_texture: () => texture,
+        get_width: () => texture.width, get_height: () => texture.height,
+        set_viewport() {}, orthographic() {}, set_modelview_matrix() {},
+    })},
+    Color: class { init_from_4f() {} },
+};
+const PaintEffect = vm.runInNewContext(`${source}\nRoundedCornersEffect`, {
+    GObject: {registerClass: (_meta, cls) => cls}, Clutter: paintClutter, Cogl: paintCogl,
+    Graphene: {Matrix: class { init_identity() { return this; } }},
+    FILL_DECLARATIONS, FILL_CODE, ROUNDED_DECLARATIONS, ROUNDED_CODE,
+});
+
+for (const scenario of ['first paint', 'content update', 'resize', 'cached repaint']) {
+    test(`shadow reads current rendered content on ${scenario}`, () => {
+        const fx = new PaintEffect();
+        const stage = {connect: () => 1};
+        Object.assign(fx.actor, {
+            revision: 1, paintCount: 0, get_stage: () => stage,
+            get_transformed_size: () => [fx.actor.get_width(), 80],
+            get_transformed_position: () => [0, 0], is_in_clone_paint: () => false,
+            get_paint_opacity: () => 255,
+        });
+        fx._pipeline = {set_layer_texture() {}, set_color() {}, set_uniform_float() {}};
+        fx._shadowEnabled = true;
+        fx._shadowPipeline = {set_layer_texture() {}, set_uniform_float() {}};
+        fx._shadowUniforms = {};
+        fx._updateTextureMapping = () => {};
+        const revisions = [];
+        fx._renderShadowTexture = texture => { revisions.push(texture.revision); return texture; };
+        const paint = flags => {
+            const root = new PaintNode();
+            fx.vfunc_paint(root, {}, flags);
+            root.paint({});
+        };
+        paint(1);
+        if (scenario !== 'first paint') {
+            if (scenario !== 'cached repaint') fx.actor.revision = 2;
+            if (scenario === 'resize') fx.actor.get_width = () => 120;
+            paint(scenario === 'content update' ? 1 : 0);
+        }
+        assert.equal(revisions.at(-1), fx.actor.revision);
+        assert.equal(fx.actor.paintCount, scenario === 'first paint' || scenario === 'cached repaint' ? 1 : 2);
+    });
+}
+
+
+test('shadow shares fill toggle, sample bounds and fractional texture mapping with the window', () => {
+    const fx = new Effect();
+    fx._shadowMaskPipeline = Cogl.Pipeline.new();
+    const keys = ['fillPadding', 'sampleBounds', 'pixelStep', 'textureOrigin'];
+    fx._shadowMaskUniforms = Object.fromEntries(keys.map(key => [key, key]));
+    for (const fillPadding of [true, false, true]) {
+        fx.updateUniforms(1, {...cfg, fillPadding}, frame, 1.5);
+        fx._updateTextureMapping(151, 121, -1 / 3, -1 / 3);
+        for (const key of keys)
+            assert.deepEqual(plain(fx._shadowMaskPipeline.values[key]), plain(fx.values[key]));
+    }
+});

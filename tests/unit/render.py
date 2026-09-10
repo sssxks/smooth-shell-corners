@@ -4,6 +4,7 @@
 # ///
 """Run with uv run tests/unit/render.py; uses headless EGL on Bazzite."""
 import re
+import unittest
 from pathlib import Path
 
 import moderngl
@@ -152,54 +153,84 @@ shadow_composite_program = ctx.program(
 shadow_mask_vao = ctx.vertex_array(shadow_mask_program, [])
 shadow_blur_vao = ctx.vertex_array(shadow_blur_program, [])
 shadow_composite_vao = ctx.vertex_array(shadow_composite_program, [])
+shadow_spread_program = ctx.program(
+    vertex_shader="""#version 330
+    out vec2 uv;
+    void main() {
+        vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
+        uv = p;
+        gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+    }""",
+    fragment_shader="""#version 330
+    #define texture2D texture
+    in vec2 uv;
+    out vec4 cogl_color_out;
+    uniform sampler2D cogl_sampler0;
+    """ + snippet("EFFECT_SHADOW_SPREAD_DECLARATIONS") + """
+    void main() {
+        vec4 cogl_tex_coord_in[1];
+        cogl_tex_coord_in[0] = vec4(uv, 0, 1);
+    """ + snippet("EFFECT_SHADOW_SPREAD_CODE") + """
+    }""",
+)
+shadow_spread_vao = ctx.vertex_array(shadow_spread_program, [])
+
+
+def render_shadow(pixels, values, size=64, work_size=64, spread=0, blur_step=0):
+    """Run the production mask, two spread, two blur and composite passes."""
+    source = ctx.texture((64, 64), 4, pixels)
+    textures = [ctx.texture((work_size, work_size), 4) for _ in range(2)]
+    for texture in [source, *textures]:
+        texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        texture.repeat_x = texture.repeat_y = False
+    targets = [ctx.framebuffer([texture]) for texture in textures]
+    output = ctx.simple_framebuffer((size, size), components=4)
+    targets[0].use()
+    source.use(location=0)
+    for key, value in values.items():
+        shadow_mask_program[key].value = value
+    shadow_mask_vao.render(vertices=3)
+    if spread:
+        for axis, step in enumerate([(1/work_size, 0), (0, 1/work_size)]):
+            targets[1-axis].use()
+            textures[axis].use(location=0)
+            shadow_spread_program['effectShadowSpreadUvStep'].value = step
+            shadow_spread_program['effectShadowSpreadPixels'].value = spread * work_size / 64
+            shadow_spread_vao.render(vertices=3)
+    if blur_step:
+        for axis, step in enumerate([(blur_step/64, 0), (0, blur_step/64)]):
+            targets[1-axis].use()
+            textures[axis].use(location=0)
+            shadow_blur_program['effectShadowBlurUvStep'].value = step
+            shadow_blur_vao.render(vertices=3)
+    output.use()
+    textures[0].use(location=0)
+    shadow_composite_program['effectShadowOpacity'].value = 1
+    shadow_composite_vao.render(vertices=3)
+    result = output.read(components=4)
+    for resource in [output, *targets, *textures, source]:
+        resource.release()
+    return np.frombuffer(result, dtype=np.uint8).reshape(size, size, 4)[:, :, 3].copy()
+
+
 source_size = 64
 source_pixels = bytes(
     c for y in range(source_size) for x in range(source_size)
     for c in (0, 0, 0, 255 if (x - 32) ** 2 + (y - 32) ** 2 <= 18 ** 2 else 0)
 )
-source_texture = ctx.texture((source_size, source_size), 4, source_pixels)
-source_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
-source_texture.use(location=0)
-shadow_mask_program['cogl_sampler0'].value = 0
-shadow_composite_program['cogl_sampler0'].value = 0
-shadow_composite_program['effectShadowOpacity'].value = 1
 for scale in [1, 1.25, 1.5, 2]:
     size = round(64 * scale)
     blur = 8
     blur_step = blur / 4
     downsample = max(1, blur_step * scale)
     work_size = round(64 * scale / downsample)
-    horizontal_texture = ctx.texture((work_size, work_size), 4)
-    horizontal_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
-    horizontal_fbo = ctx.framebuffer([horizontal_texture])
-    vertical_texture = ctx.texture((work_size, work_size), 4)
-    vertical_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
-    vertical_fbo = ctx.framebuffer([vertical_texture])
-    shadow_fbo = ctx.simple_framebuffer((size, size), components=4)
     for exponent in [2, 8, 12]:
-        horizontal_fbo.use()
-        source_texture.use(location=0)
-        for key, value in dict(effectShadowHole=(0, 0, 64, 64),
-                               effectShadowHoleRadius=12, effectShadowExp=exponent,
-                               effectShadowSpread=0, effectShadowOffset=(0, 0),
-                               effectShadowSourceSize=(64, 64),
-                               effectShadowBlurStep=blur_step,
-                               effectShadowRectOrigin=(0, 0),
-                               effectShadowRectSize=(64, 64)).items():
-            shadow_mask_program[key].value = value
-        shadow_mask_vao.render(vertices=3)
-
-        vertical_fbo.use()
-        horizontal_texture.use(location=0)
-        shadow_blur_program['cogl_sampler0'].value = 0
-        shadow_blur_program['effectShadowBlurUvStep'].value = (0, blur_step / 64)
-        shadow_blur_vao.render(vertices=3)
-
-        shadow_fbo.use()
-        vertical_texture.use(location=0)
-        shadow_composite_vao.render(vertices=3)
-        result = shadow_fbo.read(components=4)
-        alpha = np.frombuffer(result, dtype=np.uint8).reshape(size, size, 4)[:, :, 3]
+        values = dict(effectShadowHole=(0, 0, 64, 64), effectShadowHoleRadius=12,
+                      effectShadowExp=exponent, effectShadowOffset=(0, 0),
+                      effectShadowRectOrigin=(0, 0), effectShadowRectSize=(64, 64),
+                      fillPadding=0, sampleBounds=(0, 0, 1, 1),
+                      pixelStep=(1/64, 1/64), textureOrigin=(0, 0))
+        alpha = render_shadow(source_pixels, values, size, work_size, blur_step=blur_step)
         assert alpha[0, 0] == 0, (scale, exponent, 'Shadow leaked beyond the silhouette')
         assert alpha[size // 2, size // 2] > 0, (scale, exponent, 'Silhouette was not sampled')
         assert alpha[size // 2, size // 2 - round(22 * scale)] > 0, (
@@ -212,9 +243,53 @@ for scale in [1, 1.25, 1.5, 2]:
         transition = profile[(profile > 0) & (profile < 255)]
         assert len(np.unique(transition)) >= 8, (
             scale, exponent, 'Shadow edge contains discrete alpha plateaus', transition.tolist())
-    horizontal_fbo.release()
-    horizontal_texture.release()
-    vertical_fbo.release()
-    vertical_texture.release()
-    shadow_fbo.release()
 print('Opaque silhouette blur is monotonic and free of sparse-sampling steps.')
+
+# Regression tests intentionally exercise alpha boundaries inside the actor,
+# rather than only an opaque rectangle that hides incorrect spread/fill.
+
+class ShadowRegressions(unittest.TestCase):
+    def mask(self, pixels, spread=0, fill=False, scale=1):
+        values = dict(effectShadowHole=(0, 0, 64, 64), effectShadowHoleRadius=0,
+                      effectShadowExp=2, effectShadowOffset=(0, 0),
+                      effectShadowRectOrigin=(0, 0), effectShadowRectSize=(64, 64),
+                      fillPadding=int(fill),
+                      sampleBounds=(8.5/64, 8.5/64, 55.5/64, 55.5/64),
+                      pixelStep=(1/64, 1/64), textureOrigin=(0, 0))
+        size = round(64 * scale)
+        return render_shadow(pixels, values, size=size, work_size=size, spread=spread)
+
+    def test_positive_spread_expands_internal_alpha_edge(self):
+        for scale in [1, 1.25, 1.5, 2]:
+            with self.subTest(scale=scale):
+                plain = self.mask(source_pixels, scale=scale)
+                spread = self.mask(source_pixels, spread=6, scale=scale)
+                for y, x in [(32, 10), (10, 32), (32, 54), (54, 32)]:
+                    y, x = round(y * scale), round(x * scale)
+                    self.assertEqual(int(plain[y, x]), 0)
+                    self.assertEqual(int(spread[y, x]), 255)
+                self.assertEqual(int(spread[round(32*scale), round(5*scale)]), 0)
+
+    def test_negative_spread_contracts_internal_alpha_edge(self):
+        for scale in [1, 1.25, 1.5, 2]:
+            with self.subTest(scale=scale):
+                plain = self.mask(source_pixels, scale=scale)
+                spread = self.mask(source_pixels, spread=-6, scale=scale)
+                for y, x in [(32, 17), (17, 32), (32, 47), (47, 32)]:
+                    y, x = round(y * scale), round(x * scale)
+                    self.assertEqual(int(plain[y, x]), 255)
+                    self.assertEqual(int(spread[y, x]), 0)
+                self.assertEqual(int(spread[round(32*scale), round(32*scale)]), 255)
+
+    def test_fill_restores_transparent_margins_in_shadow(self):
+        pixels = bytes(c for y in range(64) for x in range(64)
+                       for c in (0, 0, 0, 255 if 8 <= x < 56 and 8 <= y < 56 else 0))
+        plain = self.mask(pixels)
+        filled = self.mask(pixels, fill=True)
+        for y, x in [(32, 1), (32, 62), (1, 32), (62, 32)]:
+            self.assertEqual(int(plain[y, x]), 0)
+            self.assertEqual(int(filled[y, x]), 255)
+
+
+if __name__ == '__main__':
+    unittest.main()
