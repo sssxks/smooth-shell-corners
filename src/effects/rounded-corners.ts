@@ -48,6 +48,7 @@ export const RoundedCornersEffect = GObject.registerClass(
         _bodyShadowTexture: Cogl.Texture | null = null;
         _bodyShadowKey = '';
         _shadowEnabled = false;
+        _shadowFailed = false;
         _shadowKey = '';
         _shadowGeneration = -1;
         _shadowHole: [number, number, number, number] = [0, 0, 0, 0];
@@ -62,6 +63,7 @@ export const RoundedCornersEffect = GObject.registerClass(
         _shadowUniforms: Record<string, number> | null = null;
 
         clearShadowResources(): void {
+            this._shadowFailed = false;
             this._bodyShadowTexture = null;
             this._bodyShadowKey = '';
             this._shadowKey = '';
@@ -246,8 +248,11 @@ export const RoundedCornersEffect = GObject.registerClass(
                     // Active windows already retain this texture for painting.
                     // LRU eviction must not force them to rebake every frame.
                     texture = this._shadowPipeline.get_layer_texture(0);
-                } else if (!texture) {
+                } else if (!texture && !this._shadowFailed) {
                     texture = this._renderShadowTexture(geometry, direct) ?? undefined;
+                    // Allocation failure persists across damage, resize and body
+                    // probes. Retry only after resource cleanup (toggle or purge).
+                    this._shadowFailed = !texture;
                     if (texture && direct) {
                         this._bodyShadowKey = directKey;
                         this._bodyShadowTexture = texture;

@@ -337,3 +337,32 @@ test('explicit shadow cleanup drops private resources and allows a fresh bake', 
     assert.equal(fx.bakes, bakes + 1);
     assert.ok(fx._shadowPipeline.get_layer_texture(0));
 });
+
+test('failed shadow allocation is not retried by damage, resize or body detection', () => {
+    const fx = shadowEffect(60, 50);
+    fx.purge();
+    const render = fx._renderShadowTexture;
+    let attempts = 0;
+    fx._renderShadowTexture = () => { attempts++; return null; };
+    fx._detectBody = true;
+    fx._ensureBodyDetector = () => {};
+    fx._bindBody = () => {};
+    fx._bodyDetector = {revision: 0, contentChanged() {}, dispose() {}};
+    const paints = fx.actor.paintCount;
+    for (let i = 0; i < 10; i++) {
+        fx.actor.get_width = () => 60 + i;
+        fx._bodyDetector.revision++;
+        fx.paint(1);
+    }
+    assert.equal(attempts, 1);
+    assert.equal(fx.actor.paintCount, paints + 10, 'Window contents keep painting');
+    fx.purge();
+    fx.paint();
+    assert.equal(attempts, 2, 'GPU purge allows one new attempt');
+    fx.paint();
+    assert.equal(attempts, 2);
+    fx.clearShadowResources();
+    fx._renderShadowTexture = render;
+    fx.paint();
+    assert.ok(fx._shadowPipeline.get_layer_texture(0), 'Resource reset allows recovery');
+});

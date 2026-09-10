@@ -37,6 +37,7 @@ function setup(failEnable = false, write = () => {}) {
         Meta: {WindowType: {NORMAL: 0}},
         Main: {layoutManager: {_startingUp: false}, notifyError: (...args) => notices.push(args)},
         console: {log() {}, error() {}},
+        restoreNativeRadius: () => calls.push(false),
         setNativeRadiusRemoved: enabled => {
             calls.push(enabled);
             if (enabled && failEnable) throw new Error('Test write failure');
@@ -86,14 +87,12 @@ test('late CSS completion after disable cannot affect a new enable cycle', async
     state.instance.enable();
     assert.equal(state.skip(), true);
     completions[0]();
-    completions[1]();
     await settle();
     assert.equal(state.skip(), true);
-    completions[2]();
+    completions[1]();
     await settle();
     assert.equal(state.skip(), false);
     state.instance.disable();
-    completions[3]();
     await settle();
 });
 

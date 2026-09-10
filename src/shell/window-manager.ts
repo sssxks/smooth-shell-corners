@@ -8,7 +8,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {RoundedCornersEffect} from '../effects/rounded-corners.js';
 import {clearShadowCache} from '../effects/shadow-baker.js';
-import { setNativeRadiusRemoved } from '../native-radius.js';
+import {setNativeRadiusRemoved, restoreNativeRadius} from '../native-radius.js';
 import {readConfig} from '../settings/config.js';
 import {clearWindowFilterCache, trackWindowFilter, forgetWindowFilter, shouldSkip as shouldSkipWindow} from './window-filter.js';
 import {disconnectSignals, type SignalConnection} from './connections.js';
@@ -317,7 +317,12 @@ export default class SmoothShellCornersExtension extends Extension {
             currentSettings().disconnect(this.#nativeRadiusConnection);
             this.#nativeRadiusConnection = 0;
         }
-        this.#syncNativeRadius(false);
+        ++this.#nativeRadiusRevision;
+        try {
+            restoreNativeRadius();
+        } catch (error) {
+            console.error(`[SmoothShellCorners] Could not restore native GTK4 corners: ${String(error)}`);
+        }
         _nativeRadiusRemoved = false;
         _settings = null;
         _mutterSettings = null;

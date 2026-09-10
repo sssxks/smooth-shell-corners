@@ -2,7 +2,7 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Gtk from 'gi://Gtk?version=4.0';
-import {nativeCssFiles, NATIVE_RADIUS_CSS, setNativeRadiusRemoved, updateCss} from '../../dist/native-radius.js';
+import {nativeCssFiles, NATIVE_RADIUS_CSS, setNativeRadiusRemoved, restoreNativeRadius, updateCss} from '../../dist/native-radius.js';
 
 function assert(condition, message) {
     if (!condition) throw new Error(message);
@@ -92,6 +92,66 @@ try {
     'Rapid toggles finish with cleanup and preserve user CSS');
     assert(read(paths[1]) === '', 'Rapid toggles leave no Flatpak override');
 
+    // Disable while discovery is suspended after the first committed file.
+    let resume, reached;
+    const paused = new Promise(resolve => { reached = resolve; });
+    const gate = new Promise(resolve => { resume = resolve; });
+    const untouched = `${root}/late/gtk.css`;
+    const editedCss = read(paths[0]) + '/* user edit */';
+    async function* pausedDiscovery() {
+        yield paths[0];
+        reached();
+        await gate;
+        yield untouched;
+    }
+    const stale = setNativeRadiusRemoved(true, pausedDiscovery());
+    await paused;
+    assert(read(paths[0]).includes(NATIVE_RADIUS_CSS), 'First file was committed before disable');
+    GLib.file_set_contents(paths[0], read(paths[0]) + '/* user edit */');
+    restoreNativeRadius();
+    assert(read(paths[0]) === editedCss, 'Disable restores CSS before returning');
+    resume();
+    await stale;
+    assert(!GLib.file_test(untouched, GLib.FileTest.EXISTS), 'Cancelled enable cannot create another CSS file');
+    assert(read(paths[0]) === editedCss, 'Late completion cannot restore the override');
+
+    let discovered = false;
+    function* queuedDiscovery() {
+        discovered = true;
+        yield untouched;
+    }
+    const queued = setNativeRadiusRemoved(true, queuedDiscovery());
+    restoreNativeRadius();
+    await queued;
+    assert(!discovered, 'Disable cancels queued work before discovery starts');
+
+    const loadContents = Gio.File.prototype.load_contents_async;
+    let releaseRead, readReached, readCancellation;
+    const readGate = new Promise(resolve => { releaseRead = resolve; });
+    const loaded = new Promise(resolve => { readReached = resolve; });
+    Gio.File.prototype.load_contents_async = async function(cancellable) {
+        const result = await loadContents.call(this, cancellable);
+        readCancellation = cancellable;
+        readReached();
+        await readGate;
+        return result;
+    };
+    try {
+        const reading = setNativeRadiusRemoved(true, [paths[0]]);
+        await loaded;
+        restoreNativeRadius();
+        assert(readCancellation.is_cancelled(), 'Disable cancels the active GIO operation');
+        releaseRead();
+        await reading;
+        assert(read(paths[0]) === editedCss, 'A late read result cannot reach the commit');
+    } finally {
+        releaseRead();
+        Gio.File.prototype.load_contents_async = loadContents;
+    }
+    await setNativeRadiusRemoved(true, paths);
+    restoreNativeRadius();
+    assert(read(paths[1]) === '', 'A new enable cycle can write and synchronously restore empty CSS');
+
     // A file in place of the Flatpak root deterministically fails enumeration,
     // including in CI running as root. Host restoration must still complete.
     const brokenRoot = `${root}/broken-flatpaks`;
@@ -114,7 +174,11 @@ try {
         'All files discovered before an error are restored');
 
     const malformed = enabled.replace('END Smooth', 'EDITED Smooth');
+    await setNativeRadiusRemoved(true, paths);
     GLib.file_set_contents(paths[0], malformed);
+    await throws(() => restoreNativeRadius(), 'Disable reports malformed markers');
+    assert(read(paths[0]) === malformed, 'Disable preserves malformed CSS');
+    assert(read(paths[1]) === '', 'Disable restores other files even if one fails');
     await setNativeRadiusRemoved(true, [paths[1]]);
     await throws(() => setNativeRadiusRemoved(false, paths), 'Malformed markers report an error');
     assert(read(paths[0]) === malformed, 'Malformed file is not truncated');
