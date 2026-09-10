@@ -92,3 +92,26 @@ Artifacts are ignored by Git but retained in this workspace:
 - [Parent timestamps](../../artifacts/gpu/20260910-204702-1097791c8e/results.json)
 - [First bad commit timestamps](../../artifacts/gpu/20260910-204900-55c53b9471/results.json)
 - [Current commit, final timestamp capture](../../artifacts/gpu/20260910-205222-c368afe654/results.json)
+
+## Optimization 1: reuse completed shadows
+
+Cache invalidation follows actual source damage (including resize, pixel phase,
+clone scale and GPU purge) and filter inputs. Repeated settings refreshes and
+nonzero opacity changes reuse the result. Disabling shadows while content
+changes also invalidates it. No shader or resolution change.
+
+The isolated repeat measured **1.039 ms/rendered damage frame**, versus
+3.837 ms before caching; uninstrumented graphics-engine use fell from
+24.2% to **7.1%** (moving: 7.2%). Each filter now runs once per rendered frame,
+instead of four times. Blur still costs 0.559 ms and spread 0.347 ms/frame.
+
+Validation: typecheck, lint, 26 Node tests (including cache invalidation),
+GJS tests, shader regressions and the full private-compositor visual/lifecycle
+suite passed. The initial exploratory capture is excluded because another GPU
+test was started around its completion; the following captures ran in isolation:
+
+- [Cache timestamps](../../artifacts/gpu/20260910-214507-0662a3c40a/results.json)
+- [Cache without timers](../../artifacts/gpu/20260910-214530-0662a3c40a/results.json)
+
+These artifacts were taken with the cache changes uncommitted; their archived
+extension and source status identify the measured build.

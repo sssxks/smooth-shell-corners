@@ -154,19 +154,20 @@ const PaintEffect = vm.runInNewContext(`${source}\nRoundedCornersEffect`, {
     FILL_DECLARATIONS, FILL_CODE, ROUNDED_DECLARATIONS, ROUNDED_CODE,
 });
 
-for (const scenario of ['first paint', 'content update', 'resize', 'cached repaint']) {
+for (const scenario of ['first paint', 'content update', 'resize', 'cached repaint', 'pixel phase', 'scale', 'GPU purge', 'disabled update']) {
     test(`shadow reads current rendered content on ${scenario}`, () => {
         const fx = new PaintEffect();
-        const stage = {connect: () => 1};
+        let purge;
+        const stage = {connect: (_signal, callback) => { purge = callback; return 1; }};
         Object.assign(fx.actor, {
             revision: 1, paintCount: 0, get_stage: () => stage,
             get_transformed_size: () => [fx.actor.get_width(), 80],
             get_transformed_position: () => [0, 0], is_in_clone_paint: () => false,
             get_paint_opacity: () => 255,
         });
-        fx._pipeline = {set_layer_texture() {}, set_color() {}, set_uniform_float() {}};
+        fx._pipeline = {set_layer_texture() {}, set_layer_null_texture() {}, set_color() {}, set_uniform_float() {}};
         fx._shadowEnabled = true;
-        fx._shadowPipeline = {set_layer_texture() {}, set_uniform_float() {}};
+        fx._shadowPipeline = {set_layer_texture() {}, set_layer_null_texture() {}, set_uniform_float() {}};
         fx._shadowUniforms = {};
         fx._updateTextureMapping = () => {};
         const revisions = [];
@@ -180,9 +181,18 @@ for (const scenario of ['first paint', 'content update', 'resize', 'cached repai
         if (scenario !== 'first paint') {
             if (scenario !== 'cached repaint') fx.actor.revision = 2;
             if (scenario === 'resize') fx.actor.get_width = () => 120;
+            if (scenario === 'pixel phase') fx.actor.get_transformed_position = () => [0.5, 0];
+            if (scenario === 'scale') fx._paintScale = 1.5;
+            if (scenario === 'GPU purge') purge();
+            if (scenario === 'disabled update') {
+                fx._shadowEnabled = false;
+                paint(1);
+                fx._shadowEnabled = true;
+            }
             paint(scenario === 'content update' ? 1 : 0);
         }
         assert.equal(revisions.at(-1), fx.actor.revision);
+        assert.equal(revisions.length, scenario === 'first paint' || scenario === 'cached repaint' ? 1 : 2);
         assert.equal(fx.actor.paintCount, scenario === 'first paint' || scenario === 'cached repaint' ? 1 : 2);
     });
 }
@@ -198,5 +208,33 @@ test('shadow shares fill toggle, sample bounds and fractional texture mapping wi
         fx._updateTextureMapping(151, 121, -1 / 3, -1 / 3);
         for (const key of keys)
             assert.deepEqual(plain(fx._shadowMaskPipeline.values[key]), plain(fx.values[key]));
+    }
+});
+
+test('shadow cache survives identical settings and opacity but invalidates filter inputs', () => {
+    const fx = new Effect();
+    fx._ensureShadowPipeline = () => {};
+    const shadow = {opacity: 115, blur: 24, spread: 7, xOffset: 0, yOffset: 0};
+    fx.updateUniforms(1, cfg, frame, 1.5, shadow);
+    const cached = {};
+    fx._shadowTexture = cached;
+    fx.updateUniforms(1, {...cfg}, {...frame}, 1.5, {...shadow, opacity: 80});
+    assert.equal(fx._shadowTexture, cached);
+    for (const change of [
+        {blur: 25}, {spread: 8}, {xOffset: 2}, {yOffset: 3}, {opacity: 0},
+    ]) {
+        fx.updateUniforms(1, cfg, frame, 1.5, shadow);
+        fx._shadowTexture = cached;
+        fx.updateUniforms(1, cfg, frame, 1.5, {...shadow, ...change});
+        assert.equal(fx._shadowTexture, null);
+    }
+    for (const change of [
+        {fillPadding: false}, {cornerRadius: 20}, {smoothing: 0.1},
+        {padding: {...cfg.padding, left: 3}},
+    ]) {
+        fx.updateUniforms(1, cfg, frame, 1.5, shadow);
+        fx._shadowTexture = cached;
+        fx.updateUniforms(1, {...cfg, ...change}, frame, 1.5, shadow);
+        assert.equal(fx._shadowTexture, null);
     }
 });

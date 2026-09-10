@@ -43,6 +43,8 @@ export const RoundedCornersEffect = GObject.registerClass(
         _sample: [number, number, number, number] = [0, 0, 0, 0];
         _windowBounds = {x1: 0, y1: 0, x2: 0, y2: 0};
         _shadowEnabled = false;
+        _shadowTexture: Cogl.Texture | null = null;
+        _shadowInputs: number[] = [];
         _shadowHole: [number, number, number, number] = [0, 0, 0, 0];
         _shadowHoleRadius = 0;
         _shadowExponent = 2;
@@ -65,6 +67,7 @@ export const RoundedCornersEffect = GObject.registerClass(
             if (this._purgeConnection) this._stage?.disconnect(this._purgeConnection);
             this._purgeConnection = 0;
             this._stage = null;
+            this._shadowTexture = null;
             this._framebuffer = null;
             this._pipeline = null;
             this._u = null;
@@ -107,6 +110,7 @@ export const RoundedCornersEffect = GObject.registerClass(
                 if (this._purgeConnection) this._stage?.disconnect(this._purgeConnection);
                 this._stage = stage;
                 this._purgeConnection = stage.connect('gl-video-memory-purged', () => {
+                    this._shadowTexture = null;
                     this._framebuffer = null;
                     this._pipeline?.set_layer_null_texture(0);
                     this._shadowMaskFramebuffer = null;
@@ -199,6 +203,8 @@ export const RoundedCornersEffect = GObject.registerClass(
             color.init_from_4f(opacity, opacity, opacity, opacity);
             this._pipeline.set_color(color);
 
+            if (dirty) this._shadowTexture = null;
+
             // Shadow sampling is immediate, so populate the source first. A
             // layer without rectangles captures content without compositing it.
             // This also preserves shaped/multi-plane content through Clutter.
@@ -213,7 +219,8 @@ export const RoundedCornersEffect = GObject.registerClass(
             if (this._shadowEnabled && sourceTexture && this._shadowPipeline && this._shadowUniforms) {
                 const pad = SHADOW_PADDING;
                 const u = this._shadowUniforms;
-                const shadowTexture = this._renderShadowTexture(sourceTexture, scale);
+                const shadowTexture = this._shadowTexture ?? this._renderShadowTexture(sourceTexture, scale);
+                this._shadowTexture = shadowTexture;
                 if (shadowTexture) {
                     this._shadowPipeline.set_layer_texture(0, shadowTexture);
                     this._shadowPipeline.set_uniform_float(u.effectShadowOpacity, 1, 1,
@@ -513,6 +520,18 @@ export const RoundedCornersEffect = GObject.registerClass(
                 this._shadowSpread = shadow.spread * scaleFactor;
                 this._shadowOffset = [shadow.xOffset * scaleFactor, shadow.yOffset * scaleFactor];
             }
+            // Compare filter inputs, not settings object identity: geometry
+            // refreshes often repeat the same values. Opacity and border color
+            // affect composition only and do not invalidate the silhouette.
+            const shadowInputs = [
+                Number(this._shadowEnabled), Number(cfg.fillPadding),
+                ...sample, windowBounds.x1, windowBounds.y1, windowBounds.x2, windowBounds.y2,
+                ...this._shadowHole, radius, exponent, this._shadowBlur,
+                this._shadowSpread, ...this._shadowOffset, paintScale, actorW, actorH,
+            ];
+            if (shadowInputs.some((value, i) => value !== this._shadowInputs[i]))
+                this._shadowTexture = null;
+            this._shadowInputs = shadowInputs;
             shadowActor.invalidate_paint_volume?.();
 
             pipeline.set_uniform_float(u.fillPadding, 1, 1, [cfg.fillPadding ? 1 : 0]);
