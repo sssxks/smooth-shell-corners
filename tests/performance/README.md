@@ -1,5 +1,17 @@
 # Automated Overview benchmark
 
+For the Overview pointer-hover regression, run `just test-hover`. This uses
+the same private GNOME 50 session and six-window fixture, with actual virtual
+pointer input at 40 ms and 2 ms intervals. It checks preview entry latency,
+title and close-button opacity, and enlargement with the extension off,
+corners only, and custom shadows. Results and the tested build are saved under
+`tests/artifacts/hover/`. Allow about 90 seconds.
+
+The 150 ms entry limit allows paths that briefly cross another preview's
+chrome (about 80 ms in the baseline), while rejecting the 300–670 ms stalls
+caused by invalid paint bounds. This is a regression check in a headless
+session, not a measurement of physical input-to-display latency.
+
 From this Bazzite/GNOME Shell 50 checkout:
 
 ```bash

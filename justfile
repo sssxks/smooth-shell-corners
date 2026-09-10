@@ -26,6 +26,10 @@ benchmark: benchmark-check
 benchmark-check:
     uv run --python 3.13 tests/performance/test_capture.py
 
+# Exercise actual pointer events and overview chrome in a private Shell.
+test-hover:
+    timeout 180s uv run tests/performance/hover.py
+
 benchmark-compare before after:
     uv run tests/performance/compare.py '{{before}}' '{{after}}'
 

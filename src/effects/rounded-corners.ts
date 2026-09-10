@@ -82,7 +82,9 @@ export const RoundedCornersEffect = GObject.registerClass(
         }
 
         override vfunc_modify_paint_volume(volume: Clutter.PaintVolume): boolean {
-            if (!this._shadowEnabled) return false;
+            // TRUE preserves the supplied bounds; FALSE makes them unknown,
+            // breaking the overview clones' cached pointer hit-test regions.
+            if (!this._shadowEnabled) return true;
             const pad = SHADOW_PADDING * this._paintScale;
             const origin = volume.get_origin();
             volume.set_origin(new Graphene.Point3D({x: origin.x - pad, y: origin.y - pad, z: origin.z}));
