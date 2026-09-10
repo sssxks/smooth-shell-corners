@@ -66,10 +66,26 @@ export function readCornerConfig(settings: Gio.Settings): CornerConfig {
 
 export function readShadowConfig(settings: Gio.Settings, focused: boolean): ShadowConfig {
     const keys = focused ? SHADOW_KEYS.focused : SHADOW_KEYS.unfocused;
+    if (settings.get_boolean(SettingsKey.shadowAdvanced)) {
+        return {
+            opacity: settings.get_int(keys.opacity), blur: settings.get_int(keys.blur),
+            spread: settings.get_int(keys.spread), xOffset: settings.get_int(keys.xOffset),
+            yOffset: settings.get_int(keys.yOffset),
+        };
+    }
+
+    // Schema defaults are the calibrated preset, independent of saved advanced
+    // values. Keep 100% exact without duplicating the calibration constants.
+    const preset = (key: string) => settings.get_default_value(key)!.get_int32();
+    const amount = settings.get_int(SettingsKey.shadowStrength) / 100;
+    const opacity = preset(keys.opacity) / 255;
     return {
-        opacity: settings.get_int(keys.opacity), blur: settings.get_int(keys.blur),
-        spread: settings.get_int(keys.spread), xOffset: settings.get_int(keys.xOffset),
-        yOffset: settings.get_int(keys.yOffset),
+        // Optical density grows steadily while alpha approaches 1 gradually.
+        opacity: Math.round(255 * (1 - Math.pow(1 - opacity, amount))),
+        blur: preset(keys.blur) * (0.75 + 0.25 * amount),
+        spread: preset(keys.spread) + 2 * (amount - 1),
+        xOffset: preset(keys.xOffset),
+        yOffset: preset(keys.yOffset),
     };
 }
 
@@ -88,7 +104,8 @@ export function readConfig(settings: Gio.Settings): ExtensionConfig {
     return {
         ...readCornerConfig(settings),
         customShadow: settings.get_boolean(SettingsKey.customShadow),
-        keepShadowMaximized: settings.get_boolean(SettingsKey.keepShadowMaximized),
+        keepShadowMaximized: settings.get_boolean(SettingsKey.shadowAdvanced) &&
+            settings.get_boolean(SettingsKey.keepShadowMaximized),
         focusedShadow: readShadowConfig(settings, true),
         unfocusedShadow: readShadowConfig(settings, false),
         blacklist: settings.get_strv(SettingsKey.blacklist),

@@ -50,7 +50,7 @@ this fork's changes are in this checkout.
 
 - **Rounded corners** — GLSL fragment shader applied per-window at draw time
 - **Squircle / superellipse** — adjustable smoothing (0 = circle, 1 = squircle)
-- **Custom shadow** — rounded CSS `box-shadow` replaces GNOME's default rectangular shadow, clipped with the same squircle curve
+- **Custom shadow** — GPU-rendered rounded shadows with libadwaita-calibrated defaults and one strength control
 - **Border** — optional inner or outer coloured border with configurable width
 - **Toolkit-aware handling** — replace native GTK4 corners or leave libadwaita / libhandy windows unchanged
 - **Blacklist / Whitelist** — exclude or exclusively include apps by `WM_CLASS`, Wayland app ID, or desktop file ID
@@ -198,18 +198,28 @@ extension remain. Turning the option off restores ordinary clipping.
 
 | Setting | Description | Default |
 |:--------|:------------|:--------|
-| Custom shadow | Replace GNOME's rectangular shadow with a rounded one | on |
-| Shadow when maximised | Keep the custom shadow for maximised windows | off |
-| Focused / Unfocused | Opacity, blur radius, spread, horizontal and vertical offset | see below |
+| Custom shadow | Replace the native shadow with a rounded one | off |
+| Shadow strength | Basic mode: adjust visual presence for both focus states | 100% (0–200%) |
+| Use advanced settings | Switch to independent manual parameters and “Shadow when maximised” | off |
 
-Default shadow values:
+Basic mode uses a preset curve for opacity, blur and spread: 0% gives no
+shadow, 100% approximates the native look, and higher values add density with
+a modest increase in extent. Advanced mode replaces the strength slider with
+individual controls. Each mode remembers its own values; switching never
+copies, multiplies or resets them. Advanced mode initially uses the defaults
+below; existing manual adjustments are preserved.
+
+Defaults approximate libadwaita 1.9.3 using the existing single-layer renderer:
 
 |  | Focused | Unfocused |
 |:-|:--------|:----------|
-| Opacity | 45 / 255 | 28 / 255 |
-| Blur | 18 px | 12 px |
-| Spread | −2 px | −2 px |
-| Y offset | 4 px | 3 px |
+| Opacity | 115 / 255 | 18 / 255 |
+| Blur | 23 px | 13 px |
+| Spread | −2 px | 7 px |
+| X / Y offset | 0 / 0 px | 0 / 0 px |
+
+See [measurement method and results](tests/shadows/README.md), or reproduce
+with `just calibrate-shadows`.
 
 ### Applications tab
 

@@ -176,7 +176,7 @@ shadow_spread_program = ctx.program(
 shadow_spread_vao = ctx.vertex_array(shadow_spread_program, [])
 
 
-def render_shadow(pixels, values, size=64, work_size=64, spread=0, blur_step=0):
+def render_shadow(pixels, values, size=64, work_size=64, spread=0, blur_step=0, rect_size=64):
     """Run the production mask, two spread, two blur and composite passes."""
     source = ctx.texture((64, 64), 4, pixels)
     textures = [ctx.texture((work_size, work_size), 4) for _ in range(2)]
@@ -195,10 +195,10 @@ def render_shadow(pixels, values, size=64, work_size=64, spread=0, blur_step=0):
             targets[1-axis].use()
             textures[axis].use(location=0)
             shadow_spread_program['effectShadowSpreadUvStep'].value = step
-            shadow_spread_program['effectShadowSpreadPixels'].value = spread * work_size / 64
+            shadow_spread_program['effectShadowSpreadPixels'].value = spread * work_size / rect_size
             shadow_spread_vao.render(vertices=3)
     if blur_step:
-        for axis, step in enumerate([(blur_step/64, 0), (0, blur_step/64)]):
+        for axis, step in enumerate([(blur_step/rect_size, 0), (0, blur_step/rect_size)]):
             targets[1-axis].use()
             textures[axis].use(location=0)
             shadow_blur_program['effectShadowBlurUvStep'].value = step

@@ -34,3 +34,63 @@ for (const [key, read, write, initial, fromWidget, fromSettings] of [
     Gio.Settings.unbind(adjustment, 'value');
 }
 print('Real GSettings/Gtk bindings preserve integers, fractions and bidirectional updates.');
+
+// Exercise real schema defaults and persisted overrides, not a settings mock.
+const {readShadowConfig, readConfig} = await import('../../dist/settings/config.js');
+function shadowEqual(actual, expected) {
+    equal(JSON.stringify(actual), JSON.stringify(expected));
+}
+equal(settings.get_int('shadow-strength'), 100);
+equal(settings.get_boolean('shadow-advanced'), false);
+for (const focused of [true, false]) {
+    settings.set_boolean('shadow-advanced', false);
+    settings.set_int('shadow-strength', 100);
+    const preset = readShadowConfig(settings, focused);
+    shadowEqual(preset, focused
+        ? {opacity: 115, blur: 23, spread: -2, xOffset: 0, yOffset: 0}
+        : {opacity: 18, blur: 13, spread: 7, xOffset: 0, yOffset: 0});
+    settings.set_boolean('shadow-advanced', true);
+    shadowEqual(readShadowConfig(settings, focused), preset);
+
+    const prefix = focused ? 'focused-shadow' : 'unfocused-shadow';
+    const manual = {opacity: 77, blur: 18, spread: -3, xOffset: -5, yOffset: 7};
+    for (const [suffix, value] of [
+        ['opacity', 77], ['blur', 18], ['spread', -3], ['x-offset', -5], ['y-offset', 7],
+    ]) settings.set_int(`${prefix}-${suffix}`, value);
+
+    for (const strength of [0, 25, 50, 100, 150, 200]) {
+        settings.set_int('shadow-strength', strength);
+        shadowEqual(readShadowConfig(settings, focused), manual);
+        settings.set_boolean('shadow-advanced', false);
+        const basic = readShadowConfig(settings, focused);
+        if (strength === 0) equal(basic.opacity, 0);
+        if (strength === 100) shadowEqual(basic, preset);
+        equal(basic.xOffset, 0);
+        equal(basic.yOffset, 0);
+        settings.set_boolean('shadow-advanced', true);
+        shadowEqual(readShadowConfig(settings, focused), manual);
+        equal(settings.get_int('shadow-strength'), strength);
+        settings.set_int(`${prefix}-opacity`, 0);
+        settings.set_boolean('shadow-advanced', false);
+        shadowEqual(readShadowConfig(settings, focused), basic);
+        settings.set_int(`${prefix}-opacity`, 77);
+        settings.set_boolean('shadow-advanced', true);
+    }
+
+    settings.set_boolean('shadow-advanced', false);
+    let previous = {opacity: -1, blur: 0, spread: -Infinity};
+    for (let strength = 0; strength <= 200; strength++) {
+        settings.set_int('shadow-strength', strength);
+        const current = readShadowConfig(settings, focused);
+        for (const key of ['opacity', 'blur', 'spread']) {
+            if (current[key] < previous[key]) throw new Error(`Non-monotonic ${key} at ${strength}`);
+        }
+        if (current.opacity > 255) throw new Error('Opacity out of range');
+        previous = current;
+    }
+}
+settings.set_boolean('keep-shadow-maximized', true);
+equal(readConfig(settings).keepShadowMaximized, false);
+settings.set_boolean('shadow-advanced', true);
+equal(readConfig(settings).keepShadowMaximized, true);
+print('Basic and advanced shadows retain independent values; 100% matches the preset and strength is monotonic.');

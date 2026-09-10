@@ -35,3 +35,7 @@ benchmark-compare before after:
 
 clean:
     rm -rf dist smooth-shell-corners@xks.shell-extension.zip
+
+# Fit native GTK shadow profiles against the production GLSL on this Bazzite host.
+calibrate-shadows: build
+    timeout 120s uv run tests/shadows/compare.py

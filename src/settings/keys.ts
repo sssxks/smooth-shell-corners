@@ -17,9 +17,10 @@ export const SettingsKey = {
     paddingRight: 'padding-right',
     paddingTop: 'padding-top',
     removeNativeRadius: 'remove-native-radius',
+    shadowAdvanced: 'shadow-advanced',
+    shadowStrength: 'shadow-strength',
     skipLibadwaitaApp: 'skip-libadwaita-app',
     skipLibhandyApp: 'skip-libhandy-app',
     smoothing: 'smoothing',
     whitelistMode: 'whitelist-mode',
 } as const;
-

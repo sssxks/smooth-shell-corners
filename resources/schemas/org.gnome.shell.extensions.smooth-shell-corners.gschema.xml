@@ -107,14 +107,27 @@
       <summary>Keep the custom shadow when a window is maximized/full-screen</summary>
     </key>
 
+    <key name="shadow-strength" type="i">
+      <range min="0" max="200"/>
+      <default>100</default>
+      <summary>Basic shadow strength as a percentage</summary>
+      <description>Control shadow presence using a preset mapping of opacity, blur and spread. 0% means no shadow; 100% approximates native libadwaita. Independent of advanced settings.</description>
+    </key>
+    <key name="shadow-advanced" type="b">
+      <default>false</default>
+      <summary>Use advanced shadow settings</summary>
+      <description>Use the individual shadow parameters instead of basic shadow strength. Each mode retains its own settings; switching modes never copies or scales them.</description>
+    </key>
+
+    <!-- Single-layer fit to libadwaita 1.9.3; see tests/shadows/README.md. -->
     <!-- focused shadow -->
     <key name="focused-shadow-opacity" type="i">
       <range min="0" max="255"/>
-      <default>45</default>
+      <default>115</default>
     </key>
     <key name="focused-shadow-blur" type="i">
       <range min="0" max="120"/>
-      <default>18</default>
+      <default>23</default>
     </key>
     <key name="focused-shadow-spread" type="i">
       <range min="-50" max="50"/>
@@ -126,21 +139,21 @@
     </key>
     <key name="focused-shadow-y-offset" type="i">
       <range min="-100" max="100"/>
-      <default>4</default>
+      <default>0</default>
     </key>
 
     <!-- unfocused shadow -->
     <key name="unfocused-shadow-opacity" type="i">
       <range min="0" max="255"/>
-      <default>28</default>
+      <default>18</default>
     </key>
     <key name="unfocused-shadow-blur" type="i">
       <range min="0" max="120"/>
-      <default>12</default>
+      <default>13</default>
     </key>
     <key name="unfocused-shadow-spread" type="i">
       <range min="-50" max="50"/>
-      <default>-2</default>
+      <default>7</default>
     </key>
     <key name="unfocused-shadow-x-offset" type="i">
       <range min="-100" max="100"/>
@@ -148,7 +161,7 @@
     </key>
     <key name="unfocused-shadow-y-offset" type="i">
       <range min="-100" max="100"/>
-      <default>3</default>
+      <default>0</default>
     </key>
 
     <!-- ── Debug ───────────────────────────────────────────────────────── -->

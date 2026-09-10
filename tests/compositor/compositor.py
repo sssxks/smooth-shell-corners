@@ -135,6 +135,16 @@ export default class Probe {{
 
         evaluate("global.ssc.settings.set_boolean('custom-shadow', true); true;")
         eventually("global.ssc.actor.get_effect('ssc-rounded-corners')._shadowEnabled")
+        # Mode switching must reach the effect on an already-open window.
+        evaluate("global.ssc.settings.set_int('shadow-strength', 0); true;")
+        eventually("!global.ssc.actor.get_effect('ssc-rounded-corners')._shadowEnabled")
+        evaluate("global.ssc.settings.set_boolean('shadow-advanced', true); true;")
+        eventually("global.ssc.actor.get_effect('ssc-rounded-corners')._shadowEnabled")
+        evaluate("global.ssc.settings.set_boolean('shadow-advanced', false); true;")
+        eventually("!global.ssc.actor.get_effect('ssc-rounded-corners')._shadowEnabled")
+        evaluate("global.ssc.settings.set_int('shadow-strength', 100); true;")
+        eventually("global.ssc.actor.get_effect('ssc-rounded-corners')._shadowEnabled")
+        print("Independent shadow modes and zero strength apply to existing windows.", flush=True)
         evaluate("global.ssc.overview.show(); true;")
         eventually("global.ssc.overview.visible")
         eventually("global.ssc.actor.get_effect('ssc-rounded-corners')._shadowEnabled && global.ssc.actor.get_effect('ssc-rounded-corners').enabled")

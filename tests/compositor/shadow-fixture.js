@@ -15,7 +15,7 @@ export function shadowFixture(fill, blur, spread, xOffset, yOffset, scale) {
         get_buffer_rect: () => ({x: 201, y: 201, width: 300, height: 240}),
         get_frame_rect: () => ({x: 201, y: 201, width: 300, height: 240}),
     };
-    const values = {'corner-radius': 12, smoothing: 0.6, 'fill-padding': fill,
+    const values = {'shadow-advanced': true, 'corner-radius': 12, smoothing: 0.6, 'fill-padding': fill,
         'padding-top': 2, 'padding-right': 2, 'padding-bottom': 2, 'padding-left': 2,
         'focused-shadow-opacity': 255, 'focused-shadow-blur': blur,
         'focused-shadow-spread': spread, 'focused-shadow-x-offset': xOffset,
