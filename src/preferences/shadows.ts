@@ -6,7 +6,7 @@ import {gettext as _} from 'resource:///org/gnome/Shell/Extensions/js/extensions
 
 import {SettingsKey} from '../settings/keys.js';
 
-import {bindAdjustment, bindBoolean as bindBool, createSpinRow as makeSpinRow} from './widgets.js';
+import {bindAdjustment, bindBoolean, createSpinRow} from './widgets.js';
 
 function makeShadowGroup(title: string, prefix: string, settings: Gio.Settings) {
     const group = new Adw.PreferencesGroup({
@@ -21,7 +21,7 @@ function makeShadowGroup(title: string, prefix: string, settings: Gio.Settings) 
     ] as const;
 
     for (const [titleText, suffix, minimum, maximum] of rows) {
-        const item = makeSpinRow(_(titleText), '', minimum, maximum, 1);
+        const item = createSpinRow(_(titleText), '', minimum, maximum, 1);
         bindAdjustment(settings, `${prefix}-${suffix}`, item.adj);
         group.add(item.row);
     }
@@ -40,7 +40,7 @@ export function addShadowPreferences(win: Adw.PreferencesWindow, settings: Gio.S
         title: _('Custom shadow'),
         subtitle: _('Replace the native shadow with a rounded one'),
     });
-    bindBool(settings, SettingsKey.customShadow, shadowRow);
+    bindBoolean(settings, SettingsKey.customShadow, shadowRow);
     toggleGroup.add(shadowRow);
 
     const controlsGroup = new Adw.PreferencesGroup();
@@ -67,7 +67,7 @@ export function addShadowPreferences(win: Adw.PreferencesWindow, settings: Gio.S
         title: _('Advanced settings'),
         subtitle: _('Tune separate parameters instead of shadow strength'),
     });
-    bindBool(settings, SettingsKey.shadowAdvanced, advanced);
+    bindBoolean(settings, SettingsKey.shadowAdvanced, advanced);
     controlsGroup.add(advanced);
     settings.bind(SettingsKey.customShadow, controlsGroup, 'sensitive', Gio.SettingsBindFlags.GET);
 
@@ -76,7 +76,7 @@ export function addShadowPreferences(win: Adw.PreferencesWindow, settings: Gio.S
         title: _('Shadow when maximised'),
         subtitle: _('Keep the custom shadow when the window is maximised or full-screen'),
     });
-    bindBool(settings, SettingsKey.keepShadowMaximized, keepShadowRow);
+    bindBoolean(settings, SettingsKey.keepShadowMaximized, keepShadowRow);
     behaviorGroup.add(keepShadowRow);
 
     for (const group of [

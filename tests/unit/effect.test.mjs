@@ -317,3 +317,23 @@ test('resizing from a private body shadow to a shared tile never reuses the priv
     assert.notEqual(fx._shadowPipeline.get_layer_texture(0), privateTexture);
     assert.ok(fx._shadowPipeline.get_layer_texture(0).get_width() < privateTexture.get_width());
 });
+
+test('explicit shadow cleanup drops private resources and allows a fresh bake', () => {
+    const fx = shadowEffect();
+    const content = fx._framebuffer;
+    fx._bodyShadowTexture = {};
+    fx._bodyShadowKey = 'private';
+    fx._shadowBaker = () => {};
+    fx.clearShadowResources();
+    for (const key of ['_bodyShadowTexture', '_shadowPipeline', '_shadowBaker', '_shadowUniforms'])
+        assert.equal(fx[key], null, key);
+    assert.equal(fx._bodyShadowKey, '');
+    assert.equal(fx._shadowKey, '');
+    assert.equal(fx._framebuffer, content, 'Corner content stays available');
+    fx.actor.get_width = () => 40;
+    fx.actor.get_height = () => 40;
+    const bakes = fx.bakes;
+    fx.paint();
+    assert.equal(fx.bakes, bakes + 1);
+    assert.ok(fx._shadowPipeline.get_layer_texture(0));
+});

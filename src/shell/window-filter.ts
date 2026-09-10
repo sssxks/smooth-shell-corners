@@ -7,11 +7,28 @@ import type {ExtensionConfig} from '../settings/config.js';
 type AppType = 'Other' | 'LibAdwaita' | 'LibHandy';
 const pendingReads = new Map<number, Gio.Cancellable>();
 const appTypeCache = new Map<number, AppType>();
+const trackedWindows = new Map<Meta.Window, number>();
+
+export function trackWindowFilter(win: Meta.Window): void {
+    if (!trackedWindows.has(win)) trackedWindows.set(win, win.get_pid());
+}
+
+export function forgetWindowFilter(win: Meta.Window): void {
+    const pid = trackedWindows.get(win);
+    if (pid === undefined) return;
+    trackedWindows.delete(win);
+    // Other windows from the same process still share its detection result.
+    if ([...trackedWindows.values()].includes(pid)) return;
+    pendingReads.get(pid)?.cancel();
+    pendingReads.delete(pid);
+    appTypeCache.delete(pid);
+}
 
 export function clearWindowFilterCache(): void {
     for (const cancellable of pendingReads.values()) cancellable.cancel();
     pendingReads.clear();
     appTypeCache.clear();
+    trackedWindows.clear();
 }
 const ROUNDABLE_WINDOW_TYPES = [
     Meta.WindowType.NORMAL,
@@ -68,7 +85,10 @@ export function isListedWindow(identifiers: string[], list: string[]): boolean {
 }
 
 function getAppType(win: Meta.Window, onReady: () => void): AppType | undefined {
-    const pid = win.get_pid();
+    const pid = trackedWindows.get(win);
+    // Geometry notifications may arrive during a close animation, after
+    // unmanaged has released this process. Do not start another read then.
+    if (pid === undefined) return 'Other';
     const cached = appTypeCache.get(pid);
     if (cached) return cached;
     if (pendingReads.has(pid)) return undefined;
@@ -84,10 +104,9 @@ function getAppType(win: Meta.Window, onReady: () => void): AppType | undefined 
             if (maps.includes('libadwaita-1.so')) type = 'LibAdwaita';
             else if (maps.includes('libhandy-1.so')) type = 'LibHandy';
         } catch (_) {}
-        // A cleared cache belongs to a new settings state or enable cycle.
+        // A closed process or disabled extension must not repopulate the cache.
         if (cancellable.is_cancelled()) return;
         pendingReads.delete(pid);
-        if (appTypeCache.size > 200) appTypeCache.clear();
         appTypeCache.set(pid, type);
         onReady();
     });

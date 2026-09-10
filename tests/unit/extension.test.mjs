@@ -129,6 +129,7 @@ function setupWindowLifecycle(ready = true) {
     let nextTimer = 0;
     let toolkitCached = true;
     const actors = [actor];
+    const filterWindows = new Set();
     const config = {customShadow: true, keepShadowMaximized: false, focusedShadow: {opacity: 115}, unfocusedShadow: {opacity: 18}};
     const state = vm.runInNewContext(`${source}
         _settings = settings;
@@ -145,7 +146,13 @@ function setupWindowLifecycle(ready = true) {
         GLib: {PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false,
             timeout_add(_priority, _delay, callback) { timers.set(++nextTimer, callback); return nextTimer; },
             source_remove(id) { timers.delete(id); }},
-        RoundedCornersEffect: class { updateUniforms(...args) { this.shadow = args[4]; } },
+        RoundedCornersEffect: class {
+            clears = 0;
+            clearShadowResources() { this.clears++; }
+            updateUniforms(...args) { this.shadow = args[4]; }
+        },
+        trackWindowFilter(win) { filterWindows.add(win); },
+        forgetWindowFilter(win) { filterWindows.delete(win); },
         shouldSkipWindow: () => !toolkitCached,
         clearWindowFilterCache() { toolkitCached = false; },
         clearShadowCache() {},
@@ -154,7 +161,7 @@ function setupWindowLifecycle(ready = true) {
             connections.length = 0;
         },
     });
-    return {...state, actor, config, actors, windowManager, timeline, settings,
+    return {...state, actor, config, actors, filterWindows, windowManager, timeline, settings,
         toolkitCached: () => toolkitCached,
         tick() {
             const callbacks = [...timers.values()];
@@ -169,6 +176,10 @@ for (const finish of ['destroy', 'disable']) {
         const state = setupWindowLifecycle();
         const {actor, windowManager} = state;
         assert.equal(actor.effects.size, 1);
+        assert.ok(state.filterWindows.has(actor.metaWindow));
+        actor.metaWindow.emit('unmanaged');
+        assert.equal(state.filterWindows.size, 0);
+        assert.equal(actor.effects.size, 1, 'Unmanaged preserves the close animation');
         windowManager.emit('destroy', actor);
         state.actors.length = 0;
         assert.equal(actor.effects.size, 1, 'close animation retains corner effect');
@@ -176,6 +187,7 @@ for (const finish of ['destroy', 'disable']) {
         else state.disable();
         assert.equal(actor.effects.size, 0);
         assert.equal(state.tracked(), 0);
+        assert.equal(state.filterWindows.size, 0);
         assert.equal(actor.callbacks.size, 0);
         assert.equal(actor.metaWindow.callbacks.size, 0);
         state.disable();
@@ -194,6 +206,7 @@ for (const finish of ['destroy', 'disable']) {
         assert.equal(state.actor.callbacks.size, 0);
         assert.equal(state.actor.metaWindow.callbacks.size, 0);
         assert.equal(state.tracked(), 0);
+        assert.equal(state.filterWindows.size, 0);
         state.disable();
     });
 }
@@ -256,8 +269,10 @@ test('maximised and fullscreen shadows follow the setting independently of corne
     s.config.keepShadowMaximized = false;
     refresh();
     assert.equal(effect.shadow, s.config.focusedShadow);
+    assert.equal(effect.clears, 0, 'Temporary shadow suppression retains resources');
     s.config.customShadow = false;
     refresh();
     assert.equal(effect.shadow, undefined);
+    assert.equal(effect.clears, 1);
     s.disable();
 });

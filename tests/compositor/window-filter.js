@@ -1,6 +1,6 @@
 import Gio from 'gi://Gio';
 import {readConfig} from '../../dist/settings/config.js';
-import {clearWindowFilterCache, getWindowIdentifiers, shouldSkip} from '../../dist/shell/window-filter.js';
+import {clearWindowFilterCache, trackWindowFilter, getWindowIdentifiers, shouldSkip} from '../../dist/shell/window-filter.js';
 
 export function checkWindowFilter(win, settings) {
     const config = readConfig(settings);
@@ -15,6 +15,7 @@ export function checkWindowFilter(win, settings) {
     }
     try {
         clearWindowFilterCache();
+        trackWindowFilter(win);
         check(!shouldSkip(win, config, false), 'Normal fixture is eligible');
         check(reads === 0, 'Disabled toolkit filters must not read proc');
         const identifiers = getWindowIdentifiers(win);

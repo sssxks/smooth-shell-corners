@@ -13,7 +13,7 @@ function setup() {
         cancel() { this.cancelled = true; }
         is_cancelled() { return this.cancelled; }
     }
-    const api = vm.runInNewContext(`${source}\n({shouldSkip, clearWindowFilterCache});`, {
+    const api = vm.runInNewContext(`${source}\n({shouldSkip, clearWindowFilterCache, trackWindowFilter, forgetWindowFilter});`, {
         TextDecoder,
         Meta: {WindowType: {NORMAL: 0, DIALOG: 1, MODAL_DIALOG: 2}},
         Shell: {WindowTracker: {get_default: () => null}},
@@ -28,6 +28,7 @@ function setup() {
         })}},
     });
     const win = {windowType: 0, get_pid: () => 123};
+    api.trackWindowFilter(win);
     const config = {blacklist: [], skipLibadwaitaApp: true, skipLibhandyApp: false};
     return {...api, reads, win, config};
 }
@@ -54,6 +55,7 @@ test('clearing the cache cancels reads and prevents stale refreshes or cache wri
     skip();
     state.clearWindowFilterCache();
     assert.equal(state.reads[0].cancellable.is_cancelled(), true);
+    state.trackWindowFilter(state.win);
     skip();
     state.reads[0].finish('/usr/lib/libadwaita-1.so.0');
     assert.equal(refreshes, 0);
@@ -70,3 +72,39 @@ test('unreadable process maps fall back without retrying on every refresh', () =
     assert.equal(state.shouldSkip(state.win, state.config, false), false);
     assert.equal(state.reads.length, 1);
 });
+
+for (const pending of [false, true]) {
+    test(`last window evicts toolkit identity, including pending read: ${pending}`, () => {
+        const state = setup();
+        const sibling = {...state.win};
+        state.trackWindowFilter(state.win); // Tracking is idempotent.
+        state.trackWindowFilter(sibling);
+        let refreshes = 0;
+        const skip = win => state.shouldSkip(win, state.config, false, () => refreshes++);
+        skip(state.win);
+        if (!pending) state.reads[0].finish('/usr/lib/libadwaita-1.so.0');
+        state.forgetWindowFilter(state.win);
+        skip(sibling);
+        assert.equal(state.reads.length, 1, 'A sibling retains the shared read/result');
+        assert.equal(state.reads[0].cancellable.is_cancelled(), false);
+        state.forgetWindowFilter(sibling);
+        skip(sibling);
+        assert.equal(state.reads.length, 1, 'Closing actor cannot restart toolkit detection');
+        const replacement = {...state.win};
+        state.trackWindowFilter(replacement);
+        skip(replacement);
+        assert.equal(state.reads.length, 2, 'Reused PID must be detected again');
+        if (pending) {
+            assert.equal(state.reads[0].cancellable.is_cancelled(), true);
+            state.reads[0].finish('/usr/lib/libadwaita-1.so.0');
+            assert.equal(refreshes, 0, 'Closed window cannot refresh or cache stale results');
+            skip(replacement);
+            assert.equal(state.reads.length, 2, 'Late callback cannot remove the replacement read');
+        }
+        state.reads[1].finish('/usr/lib/libgtk-3.so.0');
+        assert.equal(skip(replacement), false);
+        state.forgetWindowFilter(sibling); // Actor destruction after unmanaged.
+        assert.equal(skip(replacement), false);
+        assert.equal(state.reads.length, 2);
+    });
+}

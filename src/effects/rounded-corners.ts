@@ -61,22 +61,27 @@ export const RoundedCornersEffect = GObject.registerClass(
         _shadowPipeline: Cogl.Pipeline | null = null;
         _shadowUniforms: Record<string, number> | null = null;
 
+        clearShadowResources(): void {
+            this._bodyShadowTexture = null;
+            this._bodyShadowKey = '';
+            this._shadowKey = '';
+            this._shadowGeneration = -1;
+            this._shadowPipeline = null;
+            this._shadowBaker = null;
+            this._shadowUniforms = null;
+        }
+
         override vfunc_set_actor(actor: Clutter.Actor | null) {
             if (this._purgeConnection) this._stage?.disconnect(this._purgeConnection);
             this._purgeConnection = 0;
             this._stage = null;
-            this._shadowKey = '';
             this._bodyDetector?.dispose();
             this._bodyDetector = null;
-            this._bodyShadowTexture = null;
-            this._bodyShadowKey = '';
             this._bodyFailed = false;
             this._framebuffer = null;
             this._pipeline = null;
             this._u = null;
-            this._shadowPipeline = null;
-            this._shadowBaker = null;
-            this._shadowUniforms = null;
+            this.clearShadowResources();
             super.vfunc_set_actor(actor);
         }
 
@@ -110,13 +115,10 @@ export const RoundedCornersEffect = GObject.registerClass(
                     clearShadowCache();
                     this._bodyDetector?.dispose();
                     this._bodyDetector = null;
-                    this._bodyShadowTexture = null;
-                    this._bodyShadowKey = '';
+                    this.clearShadowResources();
                     this._bodyFailed = false;
                     this._framebuffer = null;
                     this._pipeline?.set_layer_null_texture(0);
-                    this._shadowPipeline = null;
-                    this._shadowBaker = null;
                     this.queue_repaint();
                 });
             }

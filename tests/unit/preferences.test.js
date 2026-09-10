@@ -1,6 +1,6 @@
 import Gio from 'gi://Gio';
 import Gtk from 'gi://Gtk?version=4.0';
-import {bindAdjustment} from '../../dist/preferences/widgets.js';
+import {bindAdjustment, bindStringList} from '../../dist/preferences/widgets.js';
 
 const schema = Gio.SettingsSchemaSource.new_from_directory(
     Gio.File.new_for_uri(import.meta.url).get_parent().resolve_relative_path('../../dist/schemas').get_path(),
@@ -94,3 +94,31 @@ equal(readConfig(settings).keepShadowMaximized, false);
 settings.set_boolean('shadow-advanced', true);
 equal(readConfig(settings).keepShadowMaximized, true);
 print('Basic and advanced shadows retain independent values; 100% matches the preset and strength is monotonic.');
+
+// Use real TextBuffer signals: replacing text first emits an empty buffer.
+settings.set_strv('blacklist', ['first.app']);
+const buffer = new Gtk.TextBuffer();
+const unbindList = bindStringList(settings, 'blacklist', buffer);
+const lists = [];
+const listConnection = settings.connect('changed::blacklist', () => {
+    lists.push(settings.get_strv('blacklist'));
+});
+settings.set_strv('blacklist', ['second.app', 'third.app']);
+equal(JSON.stringify(lists), JSON.stringify([['second.app', 'third.app']]));
+equal(buffer.text, 'second.app\nthird.app');
+// Whitespace is normalized in settings without rewriting text or moving the cursor.
+buffer.text = '  second.app  \n\nthird.app\n';
+lists.length = 0;
+buffer.place_cursor(buffer.get_iter_at_offset(4));
+buffer.insert_at_cursor('X', -1);
+equal(buffer.text, '  seXcond.app  \n\nthird.app\n');
+equal(buffer.cursor_position, 5);
+equal(JSON.stringify(settings.get_strv('blacklist')), JSON.stringify(['seXcond.app', 'third.app']));
+equal(lists.some(list => list.length === 0), false);
+unbindList();
+settings.set_strv('blacklist', ['external.app']);
+equal(buffer.text, '  seXcond.app  \n\nthird.app\n');
+buffer.text = 'detached.app';
+equal(JSON.stringify(settings.get_strv('blacklist')), JSON.stringify(['external.app']));
+settings.disconnect(listConnection);
+print('Exception editor avoids feedback writes and preserves in-progress text and cursor.');

@@ -10,7 +10,7 @@ import {RoundedCornersEffect} from '../effects/rounded-corners.js';
 import {clearShadowCache} from '../effects/shadow-baker.js';
 import { setNativeRadiusRemoved } from '../native-radius.js';
 import {readConfig} from '../settings/config.js';
-import {clearWindowFilterCache, shouldSkip as shouldSkipWindow} from './window-filter.js';
+import {clearWindowFilterCache, trackWindowFilter, forgetWindowFilter, shouldSkip as shouldSkipWindow} from './window-filter.js';
 import {disconnectSignals, type SignalConnection} from './connections.js';
 import {
     computeBounds as computeWindowBounds,
@@ -120,6 +120,7 @@ function refreshRoundedCorners(actor: Meta.WindowActor) {
         actor.add_effect_with_name(ROUNDED_CORNERS_EFFECT, fx);
     }
     fx.enabled = true;
+    if (!cfg.customShadow) fx.clearShadowResources();
 
     const scale = scaleFactor(win);
     const shadow = actor.metaWindow?.appears_focused ? cfg.focusedShadow : cfg.unfocusedShadow;
@@ -142,6 +143,11 @@ function attachWindowSignals(actor: Meta.WindowActor) {
     const win = actor.metaWindow;
     if (!win) return;
     const texture = actor.get_texture();
+
+    trackWindowFilter(win);
+    // Release toolkit identity before the close animation ends: the process
+    // may exit and its PID may be reused while its actor is still painting.
+    data.connections.push({object: win, id: win.connect('unmanaged', () => forgetWindowFilter(win))});
 
     // The window-manager destroy signal starts the close animation. Keep the
     // effect until the actor itself is destroyed, after its final painted frame.
@@ -188,6 +194,7 @@ function removeEffectFrom(actor: Meta.WindowActor) {
     const data = _actorMap.get(actor);
     if (!data) return;
     disconnectSignals(data.connections);
+    if (actor.metaWindow) forgetWindowFilter(actor.metaWindow);
     onRemoveEffect(actor);
     _actorMap.delete(actor);
 }
@@ -220,6 +227,7 @@ function enableEffect() {
             _settingsTimeoutId = 0;
         }
         _settingsTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+            if (!settings.get_boolean('custom-shadow')) clearShadowCache();
             // Appearance and filter settings do not change a process's toolkit.
             // Keep cached detection so refreshing cannot briefly exclude it.
             refreshAll();
