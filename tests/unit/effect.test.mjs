@@ -18,15 +18,18 @@ class EffectBase {
     queue_repaint() {}
 }
 const Cogl = {
+    Texture2D: {new_with_size: () => ({allocate() {}})},
     Pipeline: {new: () => ({
         values: {},
         get_uniform_location: name => name,
         set_uniform_float(name, _size, _count, values) { this.values[name] = values; },
+        set_layer_texture() {}, set_layer_combine() {},
         set_blend() {}, set_layer_filters() {}, add_layer_snippet() {}, add_snippet() {},
     })},
     Snippet: {new: () => ({set_replace() {}})},
     SnippetHook: {}, PipelineFilter: {},
 };
+const BODY_DECLARATIONS = '';
 const FILL_DECLARATIONS = '';
 const FILL_CODE = '';
 const ROUNDED_DECLARATIONS = '';
@@ -34,7 +37,7 @@ const ROUNDED_CODE = '';
 const Effect = vm.runInNewContext(`${source}\nRoundedCornersEffect`, {
     GObject: {registerClass: (_meta, cls) => cls}, Shell: {GLSLEffect: EffectBase},
     Clutter: {Effect: EffectBase}, Cogl, Graphene: {},
-    shadowGeometry, FILL_DECLARATIONS, FILL_CODE, ROUNDED_DECLARATIONS, ROUNDED_CODE,
+    shadowGeometry, BODY_DECLARATIONS, FILL_DECLARATIONS, FILL_CODE, ROUNDED_DECLARATIONS, ROUNDED_CODE,
 });
 const cfg = {
     padding: {left: 2, top: 2, right: 2, bottom: 2},
@@ -153,7 +156,7 @@ const paintCogl = {
 const PaintEffect = vm.runInNewContext(`${source}\nRoundedCornersEffect`, {
     GObject: {registerClass: (_meta, cls) => cls}, Clutter: paintClutter, Cogl: paintCogl,
     Graphene: {Matrix: class { init_identity() { return this; } }},
-    shadowGeometry, FILL_DECLARATIONS, FILL_CODE, ROUNDED_DECLARATIONS, ROUNDED_CODE,
+    shadowGeometry, BODY_DECLARATIONS, FILL_DECLARATIONS, FILL_CODE, ROUNDED_DECLARATIONS, ROUNDED_CODE,
 });
 
 function shadowEffect(width = 600, height = 400) {
@@ -167,10 +170,10 @@ function shadowEffect(width = 600, height = 400) {
         get_transformed_position: () => [0, 0], is_in_clone_paint: () => false,
         get_paint_opacity: () => 255,
     });
-    fx._pipeline = {set_layer_texture() {}, set_layer_null_texture() {}, set_color() {}, set_uniform_float() {}};
+    fx._pipeline = {get_uniform_location: name => name, set_layer_texture() {}, set_layer_null_texture() {}, set_color() {}, set_uniform_float() {}};
     fx._ensureShadowPipeline = () => {
         if (fx._shadowPipeline) return;
-        fx._shadowPipeline = {texture: null,
+        fx._shadowPipeline = {texture: null, get_uniform_location: name => name,
             set_layer_texture(_layer, texture) { this.texture = texture; },
             get_layer_texture() { return this.texture; },
             set_layer_null_texture() { this.texture = null; }, set_uniform_float() {}};
@@ -290,4 +293,23 @@ test('oversized active styles are retained without rebaking or evicting shared t
     const otherBakes = another.bakes;
     another.paint();
     assert.equal(another.bakes, otherBakes);
+});
+
+test('resizing from a private body shadow to a shared tile never reuses the private image', () => {
+    const fx = shadowEffect(180, 180);
+    fx.purge();
+    fx._detectBody = true;
+    fx._ensureBodyDetector = () => {};
+    fx._bindBody = () => {};
+    fx.paint();
+    const privateTexture = fx._shadowPipeline.get_layer_texture(0);
+    const before = fx.bakes;
+    fx.paint();
+    assert.equal(fx.bakes, before, 'Unchanged small window should retain its private tile');
+    fx.actor.get_width = () => 600;
+    fx.actor.get_height = () => 400;
+    fx.paint();
+    assert.equal(fx.bakes, before + 1);
+    assert.notEqual(fx._shadowPipeline.get_layer_texture(0), privateTexture);
+    assert.ok(fx._shadowPipeline.get_layer_texture(0).get_width() < privateTexture.get_width());
 });

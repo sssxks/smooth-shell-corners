@@ -1,12 +1,17 @@
 export const FILL_DECLARATIONS = /* glsl */`
 uniform float fillPadding;
 uniform vec4 sampleBounds;
+uniform vec2 bodyTextureStep;
 `;
 
 export const FILL_CODE = /* glsl */`
     vec2 uv = cogl_tex_coord.st;
-    if (fillPadding > 0.5)
-        uv = clamp(uv, sampleBounds.xy, sampleBounds.zw);
+    vec4 insets = readBodyInsets();
+    if (fillPadding > 0.5 && insets.x >= 0.0) {
+        vec4 samples = sampleBounds + vec4(insets.xy, -insets.zw) * bodyTextureStep.xyxy;
+        vec2 middle = (samples.xy + samples.zw) * 0.5;
+        uv = clamp(uv, min(samples.xy, middle), max(samples.zw, middle));
+    }
     cogl_texel = texture2D(cogl_sampler, uv);
 `;
 
@@ -56,11 +61,17 @@ float getOpacity(vec2 p, vec4 b, float r, float e) {
 `;
 
 export const ROUNDED_CODE = /* glsl */`
+    vec4 insets = readBodyInsets();
+    if (insets.x >= 0.0) {
+    vec4 body = insetBody(bounds, insets);
+    float radius = clipRadius, power = exponent;
+    fitBodyRadius(body, radius, power);
     vec2  p = cogl_tex_coord_in[0].xy / pixelStep + textureOrigin;
-    float a = getOpacity(p, bounds, clipRadius, exponent);
+    float a = getOpacity(p, body, radius, power);
 
     if (borderWidth > 0.9 || borderWidth < -0.9) {
-        float ba = getOpacity(p, borderedAreaBounds, borderedAreaClipRadius, exponent);
+        float ba = getOpacity(p, insetBody(borderedAreaBounds, insets),
+            clipRadius > 0.0 ? borderedAreaClipRadius * radius / clipRadius : 0.0, power);
         if (borderWidth > 0.0) {
             cogl_color_out *= a;
             float edgeAlpha = clamp(abs(a - ba), 0.0, 1.0);
@@ -73,6 +84,7 @@ export const ROUNDED_CODE = /* glsl */`
         }
     } else {
         cogl_color_out *= a;
+    }
     }
 `;
 
@@ -115,8 +127,13 @@ float effectOpacity(vec2 p, vec4 b, float r, float e) {
 }
 
 float effectGeometryMask(vec2 p) {
-    return effectOpacity(p - effectShadowOffset, effectShadowHole,
-                         effectShadowHoleRadius, effectShadowExp) > 0.001 ? 1.0 : 0.0;
+    vec4 insets = readBodyInsets();
+    if (insets.x < 0.0) return 0.0;
+    vec4 body = insetBody(effectShadowHole, insets);
+    float radius = effectShadowHoleRadius, power = effectShadowExp;
+    fitBodyRadius(body, radius, power);
+    return effectOpacity(p - effectShadowOffset, body,
+                         radius, power) > 0.001 ? 1.0 : 0.0;
 }
 `;
 
@@ -213,21 +230,30 @@ uniform vec2 effectShadowTextureSize;
 uniform vec2 effectShadowOffset;
 uniform float effectShadowMargin;
 uniform float effectShadowEdge;
+uniform float effectShadowDirect;
 `;
 
 export const EFFECT_SHADOW_CODE = /* glsl */`
-    vec2 p = effectShadowRectOrigin + cogl_tex_coord_in[0].xy * effectShadowRectSize;
-    vec2 local = p - bounds.xy - effectShadowOffset;
-    vec2 stretch = max(bounds.zw - bounds.xy - effectShadowTileSize, vec2(0.0));
-    vec2 tile = local - clamp(local - vec2(effectShadowEdge), vec2(0.0), stretch);
-    vec2 uv = (tile + vec2(effectShadowMargin)) / effectShadowTextureSize;
-    float outer = texture2D(cogl_sampler0, uv).a;
-    // Keep shadow under the antialiased edge, but never beneath the interior
-    // of a translucent window. The hole stays put when the shadow is offset.
-    vec4 hole = bounds + vec4(1.0, 1.0, -1.0, -1.0);
-    float interior = getOpacity(p, hole, max(clipRadius - 1.0, 0.0), exponent);
-    cogl_color_out = vec4(0.0, 0.0, 0.0,
-                          outer * (1.0 - interior) * effectShadowOpacity);
+    vec4 insets = readBodyInsets();
+    if (insets.x < 0.0) {
+        cogl_color_out = vec4(0.0);
+    } else {
+        vec4 body = insetBody(bounds, insets);
+        float radius = clipRadius, power = exponent;
+        fitBodyRadius(body, radius, power);
+        vec2 p = effectShadowRectOrigin + cogl_tex_coord_in[0].xy * effectShadowRectSize;
+        vec2 local = p - body.xy - effectShadowOffset;
+        vec2 stretch = max(body.zw - body.xy - effectShadowTileSize, vec2(0.0));
+        vec2 tile = local - clamp(local - vec2(effectShadowEdge), vec2(0.0), stretch);
+        if (effectShadowDirect > 0.5) tile = p - bounds.xy - effectShadowOffset;
+        vec2 uv = (tile + vec2(effectShadowMargin)) / effectShadowTextureSize;
+        float outer = texture2D(cogl_sampler0, uv).a;
+        // Keep shadow under the antialiased edge, but clear the unshifted body.
+        vec4 hole = body + vec4(1.0, 1.0, -1.0, -1.0);
+        float interior = getOpacity(p, hole, max(radius - 1.0, 0.0), power);
+        cogl_color_out = vec4(0.0, 0.0, 0.0,
+                              outer * (1.0 - interior) * effectShadowOpacity);
+    }
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -303,3 +329,120 @@ export const SHADOW_CODE = /* glsl */`
 // offscreen. At 150%, a native 1.5x window gets resampled to 2x and back to 1.5x.
 // Own the framebuffer here to keep the intermediate image at the monitor scale.
 // The shadow below can still use Shell.GLSLEffect: it contains no sharp content.
+
+// The 1x1 floating-point texture stores left/top/right/bottom insets in actor
+// coordinates. A negative left inset means preserve the original appearance.
+export const BODY_DECLARATIONS = /* glsl */`
+uniform float bodyEnabled;
+vec4 readBodyInsets() {
+    if (bodyEnabled < 0.5) return vec4(0.0);
+    if (bodyEnabled > 1.5) return vec4(-1.0);
+    return texture2D(cogl_sampler1, vec2(0.5));
+}
+vec4 insetBody(vec4 rectangle, vec4 insets) {
+    return rectangle + vec4(insets.xy, -insets.zw);
+}
+void fitBodyRadius(vec4 rectangle, inout float radius, inout float power) {
+    float limit = max(0.0, min(rectangle.z - rectangle.x, rectangle.w - rectangle.y) * 0.5);
+    if (radius > limit && radius > 0.0) {
+        power *= limit / radius;
+        radius = limit;
+    }
+}
+`;
+
+// Four fragments scan three parallel rays each. The bounded search looks for
+// opaque straight sides, not an arbitrary alpha silhouette. Uniformly
+// translucent edges may retain a zero inset, but cannot define a new inset.
+export const BODY_PROBE_DECLARATIONS = /* glsl */`
+uniform vec4 bodyProbeFrame;
+uniform vec2 bodyProbeStep;
+uniform vec2 bodyProbeOrigin;
+uniform float bodyProbeScale;
+float probeAlpha(vec2 p) {
+    return texture2D(cogl_sampler0, (p - bodyProbeOrigin) * bodyProbeStep).a;
+}
+`;
+export const BODY_PROBE_CODE = /* glsl */`
+    int side = int(floor(cogl_tex_coord_in[0].x * 4.0));
+    bool horizontal = side == 0 || side == 2;
+    bool reverse = side >= 2;
+    vec2 size = bodyProbeFrame.zw - bodyProbeFrame.xy;
+    float extent = horizontal ? size.x : size.y;
+    float limit = min(64.0, max(0.0, extent * 0.25 - 1.0 / bodyProbeScale));
+    vec3 edges = vec3(-1.0);
+    vec3 firstAlpha = vec3(0.0);
+    for (int pixel = 0; pixel <= int(ceil(limit * bodyProbeScale)); pixel++) {
+        float distance = (float(pixel) + 0.5) / bodyProbeScale;
+        for (int ray = 0; ray < 3; ray++) {
+            if (edges[ray] >= 0.0) continue;
+            float across = float(ray + 1) * 0.25;
+            vec2 p = bodyProbeFrame.xy + size * (horizontal ? vec2(0.0, across) : vec2(across, 0.0));
+            float along = reverse ? extent - distance : distance;
+            if (horizontal) p.x += along; else p.y += along;
+            float alpha = probeAlpha(p);
+            if (pixel == 0) firstAlpha[ray] = alpha;
+            if (alpha >= 0.98) edges[ray] = float(pixel) / bodyProbeScale;
+        }
+        if (min(edges.x, min(edges.y, edges.z)) >= 0.0) break;
+    }
+    float lo = min(edges.x, min(edges.y, edges.z));
+    float hi = max(edges.x, max(edges.y, edges.z));
+    float valid = lo >= 0.0 && hi - lo <= 1.01 / bodyProbeScale ? 1.0 : 0.0;
+    float translucent = min(firstAlpha.x, min(firstAlpha.y, firstAlpha.z));
+    if (valid < 0.5 && translucent >= 0.05 &&
+        max(firstAlpha.x, max(firstAlpha.y, firstAlpha.z)) - translucent < 0.02) {
+        lo = 0.0;
+        valid = 1.0;
+    }
+    cogl_color_out = vec4(max(lo, 0.0), valid, 0.0, 1.0);
+`;
+
+// Validate a grid inside the candidate body and samples beside its straight
+// edges. This is a conservative heuristic, not a proof that every pixel is
+// rectangular. In particular, disconnected content must not acquire a box.
+export const BODY_VALIDATE_DECLARATIONS = /* glsl */`
+uniform vec4 bodyValidateFrame;
+uniform vec2 bodyValidateStep;
+uniform vec2 bodyValidateOrigin;
+uniform float bodyValidateScale;
+float bodyAlpha(vec2 p) {
+    return texture2D(cogl_sampler0, (p - bodyValidateOrigin) * bodyValidateStep).a;
+}
+`;
+export const BODY_VALIDATE_CODE = /* glsl */`
+    vec4 insets;
+    bool valid = true;
+    for (int side = 0; side < 4; side++) {
+        vec4 result = texture2D(cogl_sampler1, vec2((float(side) + 0.5) / 4.0, 0.5));
+        insets[side] = result.x;
+        valid = valid && result.y > 0.5;
+    }
+    vec4 b = bodyValidateFrame + vec4(insets.xy, -insets.zw);
+    vec2 size = b.zw - b.xy;
+    valid = valid && min(size.x, size.y) >= 8.0;
+    // Ignore the corner squares while checking interior coverage. A regular
+    // translucent background is allowed; transparent holes are not.
+    for (int y = 0; y < 9; y++) {
+        for (int x = 0; x < 9; x++) {
+            if ((x < 2 || x > 6) && (y < 2 || y > 6)) continue;
+            vec2 p = b.xy + size * (vec2(float(x), float(y)) + 0.5) / 9.0;
+            valid = valid && bodyAlpha(p) >= 0.05;
+        }
+    }
+    // Once a side has been inferred, content beyond it must be decoration,
+    // not another opaque island. Probe the excluded strip at several points.
+    for (int side = 0; side < 4; side++) {
+        if (insets[side] <= 1.0 / bodyValidateScale) continue;
+        for (int ray = 1; ray < 8; ray++) {
+            float t = float(ray) / 8.0;
+            vec2 p;
+            if (side == 0) p = vec2(bodyValidateFrame.x + insets.x * 0.5, mix(b.y, b.w, t));
+            else if (side == 1) p = vec2(mix(b.x, b.z, t), bodyValidateFrame.y + insets.y * 0.5);
+            else if (side == 2) p = vec2(bodyValidateFrame.z - insets.z * 0.5, mix(b.y, b.w, t));
+            else p = vec2(mix(b.x, b.z, t), bodyValidateFrame.w - insets.w * 0.5);
+            valid = valid && bodyAlpha(p) < 0.98;
+        }
+    }
+    cogl_color_out = valid ? insets : vec4(-1.0, -1.0, -1.0, 1.0);
+`;

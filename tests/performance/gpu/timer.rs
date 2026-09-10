@@ -129,6 +129,8 @@ impl Context {
         );
         let (label, axis) = *self.programs.entry(program).or_insert_with(|| {
             for (name, label, directional) in [
+                (c"bodyProbeFrame", "body-probe", false),
+                (c"bodyValidateFrame", "body-validate", false),
                 (c"effectShadowBlurUvStep", "blur", true),
                 (c"effectShadowSpreadUvStep", "spread", true),
                 (c"effectShadowHole", "mask", false),

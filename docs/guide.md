@@ -11,7 +11,7 @@
 | Radius | Corner radius in logical pixels | `8` |
 | Smoothing | `0` = circle · `1` = squircle (superellipse) | `1.0` |
 | Clip padding | Extra gap between the window edge and the clip boundary | `1` |
-| Fill clipped edges | Extend pixels from inside the padding to the original window bounds | on |
+| Fill clipped edges | Extend pixels from inside the padding to the detected window body | on |
 | Border width | Positive = inner border · Negative = outer · `0` = none | `0` |
 | Border colour | RGBA colour picker | `(0.8, 0.8, 0.85, 1)` |
 | Keep rounded when maximised | Apply corners even when a window fills the screen | on |
@@ -21,7 +21,7 @@ To hide a 2px application border without opening seams between tiled windows,
 enable **Fill clipped edges**, set the four padding values to **2**, and set
 **Border width** to **0**. Padding follows the extension's monitor scaling.
 The shader repeats the nearest interior row/column without resizing the content;
-the corner mask and custom shadow use the original window footprint.
+the corner mask and custom shadow use the detected body before clip padding.
 
 Content touching the sampled edge (such as scrollbars or images) will stretch
 across the narrow strip. Transparent app backgrounds and client-drawn rounded
@@ -70,13 +70,18 @@ casting shadows around its text or darkening its interior.
 | Whitelist mode | Treat the exception list as a whitelist instead of a blacklist | off |
 | Exception list | One application identifier per line (`WM_CLASS`, Wayland app ID, or desktop ID) | — |
 
-For apps that draw an irregular shape, add their identifier to **Exception list**
-with **Whitelist mode** off. This removes the whole window effect: clipping,
-padding fill, corners, borders, and custom shadows. There is no automatic
-transparency scan: transparent decoration margins and translucent rectangular
-windows do not necessarily mean an app owns its shape. To preserve an excluded
-GTK4 app's native styling too, turn off **Replace native GTK4 corners** and restart
-it; that CSS override applies globally, including to excluded apps.
+Normal windows and dialogs automatically check for a rectangular body. Transparent
+decoration margins can be removed before applying corners and shadows to that
+body. Utility windows, toolbars and splash screens receive no window effect.
+If the GPU check cannot identify a body, clipping, padding fill, corners, borders
+and custom shadows pass through without changing the app's appearance.
+
+Detection is a bounded sampling heuristic, not a complete silhouette scan. It
+searches at most 64 logical pixels inward and checks a sparse interior grid;
+tiny holes or later shape changes without resizing may escape detection.
+The **Exception list** remains available as an explicit override. To preserve
+an app's native GTK4 styling too, turn off **Replace native GTK4 corners** and
+restart it; that CSS override applies globally, including to skipped apps.
 
 #### Native GTK4 corner removal
 
@@ -209,10 +214,23 @@ windows positioned between physical pixels. Overview clones use their projected
 paint size. Cached content is redrawn when the app updates or the sampling grid
 changes. No Mutter patch is needed.
 
+Body detection uses a 4×1 floating-point probe texture and a 1×1 result texture
+containing four insets. The painting shaders consume that result directly;
+production code never reads pixels back to the CPU. Up to three checks during
+startup accommodate initial app painting. Resizing reuses the previous insets
+and schedules one check after geometry settles for 180 ms. Ordinary content
+damage does not trigger detection. A GPU-rejected normal window still retains
+its content framebuffer; utility windows bypass allocation altogether. If
+floating-point targets are unavailable, the effect preserves the app visually.
+
 Shadows use shared geometry textures with fixed corners and stretchable straight
 sections. The spread and Gaussian blur are baked only when their geometry or
 style changes; application damage and ordinary resizing reuse the tile. Each
 axis too small to separate opposite corners is rendered at its actual size.
+With automatic body detection, windows within 128 logical pixels of that limit
+use a private full-size shadow tile so GPU insets cannot make stretched corners
+overlap. This path rebakes on resize; sufficiently large windows keep sharing
+tiles. Private tiles are released with their window or on GPU-memory purge.
 Fractional edge phases can select different tiles. Overview clones sample the
 monitor-density tile. The final shader clears the unshifted window interior so
 shadow offsets do not darken translucent content.
@@ -246,7 +264,8 @@ just check
 gjs -m tests/unit/native-radius.test.js
 gjs -m tests/compositor/native-radius-render.js
 uv run tests/unit/render.py
-timeout 120s uv run tests/compositor/compositor.py
+uv run tests/unit/body-render.py
+timeout 300s uv run tests/compositor/compositor.py
 glib-compile-schemas --strict --dry-run resources/schemas
 ```
 
@@ -261,6 +280,8 @@ and checks a synthetic border, content preservation, opacity, corner clipping,
 and window/shadow composition without an antialiasing seam.
 It uses an isolated uv environment with Python 3.13 and ModernGL. These checks do
 not replace testing in GNOME Shell with real apps, scaling, and tiling animations.
+The body shader test checks native shadow margins, asymmetric insets, translucent
+rectangles, holes and disconnected overlays; pixel readback is confined to tests.
 The native-radius file tests use temporary directories, including simulated
 Flatpak configs; they do not modify your GTK settings. The native rendering test
 briefly opens a libadwaita window in the current graphical session and verifies
@@ -273,6 +294,10 @@ with the effect disabled at 100%, 125%, 150% and 200%, including fractional pixe
 positions, content updates, opacity and an overview-style clone. Results are
 written to `tests/artifacts/sharpness-results.json`. This renderer has not yet been verified
 on older Shell releases or with mixed-monitor setups and other window effects.
+Additional real GTK fixtures compare automatic dialog bounds against a manually
+specified 16px inset at all four scales, including small windows and clamped
+radii. Utility classification removes the effect; the same transparent overlay
+classified as a normal window must also preserve its original pixels.
 
 The same compositor test checks shadow continuity along all four edges and corners
 at those scales, with filling on/off and varied blur, spread and offsets. A black
@@ -282,4 +307,3 @@ original effects from Rounded Windows commit `9d9eb77013b24e45ae75fc92a85a9b6d82
 The fix accounts for Mutter's padded offscreen texture, matches the window's
 buffer-edge inset, and keeps shadow under the antialiased edge instead of cutting
 both layers away there.
-

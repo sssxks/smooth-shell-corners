@@ -1,5 +1,9 @@
 # Geometry shadows — 2026-09-10
 
+This records the geometry-only baseline committed as `cabf931`. The subsequent
+[GPU body-detection report](body-detection.md) covers automatic handling of
+transparent margins and overlays.
+
 The default custom shadow now follows the configured rounded rectangle. It no
 longer captures or thresholds application alpha. Shaped apps can use the existing
 exception list to bypass the complete compositor effect; no automatic pixel scan

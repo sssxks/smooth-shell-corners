@@ -130,7 +130,7 @@ function refreshRoundedCorners(actor: Meta.WindowActor) {
     const scale = scaleFactor(win);
     const shadow = actor.metaWindow?.appears_focused ? cfg.focusedShadow : cfg.unfocusedShadow;
     fx.updateUniforms(scale, cfg, computeWindowBounds(actor, scale, cfg.fillPadding),
-        global.display.get_monitor_scale(win.get_monitor()), cfg.customShadow ? shadow : undefined);
+        global.display.get_monitor_scale(win.get_monitor()), cfg.customShadow ? shadow : undefined, true);
 }
 
 /** Refresh tracked windows without replacing their lifecycle connections. */
@@ -161,6 +161,7 @@ function attachWindowSignals(actor: Meta.WindowActor) {
     data.connections.push({object: win, id: win.connect('notify::fullscreen', () => refreshRoundedCorners(actor))});
     data.connections.push({object: win, id: win.connect('notify::maximized-horizontally', () => refreshRoundedCorners(actor))});
     data.connections.push({object: win, id: win.connect('notify::maximized-vertically', () => refreshRoundedCorners(actor))});
+    data.connections.push({object: win, id: win.connect('notify::window-type', () => refreshRoundedCorners(actor))});
     // Focus changed → update shadow configuration
     data.connections.push({object: win, id: win.connect('notify::appears-focused', () => refreshRoundedCorners(actor))});
     data.connections.push({object: win, id: win.connect('workspace-changed', () => refreshRoundedCorners(actor))});

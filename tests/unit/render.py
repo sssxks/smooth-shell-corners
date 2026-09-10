@@ -34,8 +34,9 @@ program = ctx.program(
     in vec2 uv;
     out vec4 cogl_color_out;
     uniform sampler2D cogl_sampler;
+    uniform sampler2D cogl_sampler1;
     uniform float actorOpacity;
-    """ + snippet("FILL_DECLARATIONS") + snippet("ROUNDED_DECLARATIONS") + """
+    """ + snippet("BODY_DECLARATIONS") + snippet("FILL_DECLARATIONS") + snippet("ROUNDED_DECLARATIONS") + """
     void main() {
         vec4 cogl_tex_coord = vec4(uv, 0, 1);
         vec4 cogl_tex_coord_in[1];
@@ -103,7 +104,8 @@ shadow_mask_program = ctx.program(
     in vec2 uv;
     out vec4 cogl_color_out;
     uniform sampler2D cogl_sampler0;
-    """ + snippet("EFFECT_SHADOW_MASK_DECLARATIONS") + """
+    uniform sampler2D cogl_sampler1;
+    """ + snippet("BODY_DECLARATIONS") + snippet("EFFECT_SHADOW_MASK_DECLARATIONS") + """
     void main() {
         vec4 cogl_tex_coord_in[1];
         cogl_tex_coord_in[0] = vec4(uv, 0, 1);
@@ -124,6 +126,7 @@ shadow_blur_program = ctx.program(
     in vec2 uv;
     out vec4 cogl_color_out;
     uniform sampler2D cogl_sampler0;
+    uniform sampler2D cogl_sampler1;
     """ + snippet("EFFECT_SHADOW_BLUR_DECLARATIONS") + """
     void main() {
         vec4 cogl_tex_coord_in[1];
@@ -145,7 +148,8 @@ shadow_composite_program = ctx.program(
     in vec2 uv;
     out vec4 cogl_color_out;
     uniform sampler2D cogl_sampler0;
-    """ + snippet("ROUNDED_DECLARATIONS") + snippet("EFFECT_SHADOW_DECLARATIONS") + """
+    uniform sampler2D cogl_sampler1;
+    """ + snippet("BODY_DECLARATIONS") + snippet("ROUNDED_DECLARATIONS") + snippet("EFFECT_SHADOW_DECLARATIONS") + """
     void main() {
         vec4 cogl_tex_coord_in[1];
         cogl_tex_coord_in[0] = vec4(uv, 0, 1);
@@ -169,6 +173,7 @@ shadow_spread_program = ctx.program(
     in vec2 uv;
     out vec4 cogl_color_out;
     uniform sampler2D cogl_sampler0;
+    uniform sampler2D cogl_sampler1;
     """ + snippet("EFFECT_SHADOW_SPREAD_DECLARATIONS") + """
     void main() {
         vec4 cogl_tex_coord_in[1];

@@ -45,6 +45,8 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
 import Cogl from 'gi://Cogl';
+import Meta from 'gi://Meta';
+import St from 'gi://St';
 import GObject from 'gi://GObject';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -64,7 +66,7 @@ export default class Probe {{
         const settings = extension.getSettings();
         settings.set_boolean('skip-libadwaita-app', false);
         settings.set_boolean('keep-rounded-maximized', false);
-        global.ssc = {{RoundedCornersEffect, clearShadowCache, Pass, Clutter, overview: Main.overview, makeShadow: shadowFixture, extension, settings, checkWindowFilter}};
+        global.ssc = {{RoundedCornersEffect, clearShadowCache, Meta, St, Pass, Clutter, overview: Main.overview, makeShadow: shadowFixture, extension, settings, checkWindowFilter}};
         this.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {{
             Main.overview.hide();
             this.owner = Gio.bus_own_name(Gio.BusType.SESSION, 'org.example.SSCProbe',
@@ -276,7 +278,9 @@ export default class Probe {{
             evaluate("global.ssc.fixtureEffect._shadowEnabled = true; global.stage.emit('gl-video-memory-purged'); true;")
             purged = capture("tile-purged")
             assert evaluate("global.ssc.shadowBakes") == 2
-            region = (slice(0, round(700*scale)), slice(0, round(900*scale)))
+            # Include the entire window and shadow, excluding Shell's clock.
+            region = (slice(round(120*scale), round(690*scale)),
+                      slice(round(120*scale), round(890*scale)))
             delta = abs(purged[region] - translucent[region])
             assert delta.max() <= 1, "Purge changed the shadow"
         evaluate("global.ssc.shadowFixture.forEach(a => a.destroy()); global.ssc.shadowFixture = null; true;")
@@ -376,6 +380,67 @@ export default class Probe {{
                     if blur:
                         assert masses[1][axis] > masses[0][axis] + 1.5, (scale, blur, axis, masses)
         print("Positive and negative spread affect both axes with blur enabled.", flush=True)
+
+        evaluate("global.ssc.shadowFixture?.forEach(a => a.destroy()); global.ssc.shadowFixture = null; true;")
+        # A real GTK dialog with native transparent margins, plus a utility
+        # overlay. All type changes happen inside this private compositor.
+        evaluate("""(() => {
+            const s=global.ssc.settings;
+            s.set_boolean('custom-shadow', true); s.set_boolean('shadow-advanced', true);
+            s.set_boolean('fill-padding', true); s.set_int('corner-radius', 12);
+            s.set_double('smoothing', 0.6); s.set_int('border-width', 0);
+            for (const side of ['top','right','bottom','left']) s.set_int('padding-'+side, 2);
+            for (const state of ['focused','unfocused']) {
+                for (const [key,value] of Object.entries({opacity:255,blur:24,spread:7,'x-offset':0,'y-offset':0}))
+                    s.set_int(state+'-shadow-'+key, value);
+            }
+            global.ssc.extension.enable();
+            const bg=new global.ssc.St.Bin({x:0,y:0,width:2000,height:1200,style:'background: white;'});
+            global.windowGroup.add_child(bg); global.ssc.bodyBackground=bg;
+            return true;
+        })()""")
+        for scale, width, height, radius in [(s,w,h,r) for s in [1,1.25,1.5,2]
+                for w,h,r in [(640,420,12),(320,240,12),(320,240,36)]]:
+            control('scale', scale)
+            evaluate(f"global.ssc.settings.set_int('corner-radius', {radius}); true;")
+            control('body-dialog')
+            eventually("global.get_window_actors().some(a => a.metaWindow.title === 'SSC body-dialog')")
+            evaluate(f"""global.ssc.bodyActor=global.get_window_actors().find(a=>a.metaWindow.title==='SSC body-dialog');
+                global.ssc.bodyActor.metaWindow.set_type(global.ssc.Meta.WindowType.DIALOG);
+                global.ssc.bodyActor.metaWindow.move_resize_frame(false,101,101,{width},{height}); true;""")
+            eventually(f"global.ssc.bodyActor.width === {width} && global.ssc.bodyActor.height === {height} && global.ssc.bodyActor.get_effect('ssc-rounded-corners')?._bodyDetector?.revision > 0 && global.ssc.bodyActor.get_effect('ssc-rounded-corners')._bodyDetector.timer === 0")
+            automatic = capture('body-auto')
+            evaluate("global.ssc.bodyFx=global.ssc.bodyActor.get_effect('ssc-rounded-corners'); global.ssc.bodyRevision=global.ssc.bodyFx._bodyDetector.revision; global.ssc.bodyActor.queue_redraw(); true;")
+            capture('body-damage')
+            assert evaluate('global.ssc.bodyFx._bodyDetector.revision === global.ssc.bodyRevision'), 'Content damage rescanned body'
+            evaluate(f"""(() => {{
+                const a=global.ssc.bodyActor; a.remove_effect_by_name('ssc-rounded-corners');
+                const fx=new global.ssc.RoundedCornersEffect(); a.add_effect_with_name('ssc-rounded-corners',fx);
+                fx.updateUniforms(1,{{padding:{{left:2,top:2,right:2,bottom:2}},cornerRadius:{radius},
+                    smoothing:0.6,borderWidth:0,borderColor:[1,1,1,1],fillPadding:true}},
+                    {{x1:16,y1:16,x2:a.width-16,y2:a.height-16}},{scale},
+                    {{opacity:255,blur:24,spread:7,xOffset:0,yOffset:0}});
+                return true;
+            }})()""")
+            reference = capture('body-manual-reference')
+            crop = (slice(round(60*scale),round(580*scale)), slice(round(60*scale),round(800*scale)))
+            delta = abs(automatic[crop]-reference[crop])
+            assert delta.max() <= 1, ('Detected body differs from known 16px inset',scale,width,height,radius,delta.max())
+            control('close')
+        control('scale', 1)
+        control('body-overlay')
+        eventually("global.get_window_actors().some(a => a.metaWindow.title === 'SSC body-overlay')")
+        evaluate("global.ssc.bodyActor=global.get_window_actors().find(a=>a.metaWindow.title==='SSC body-overlay'); global.ssc.bodyActor.metaWindow.move_resize_frame(false,101,101,640,140); global.ssc.bodyActor.metaWindow.set_type(global.ssc.Meta.WindowType.UTILITY); true;")
+        eventually("!global.ssc.bodyActor.get_effect('ssc-rounded-corners')")
+        utility = capture('body-utility')
+        evaluate("global.ssc.bodyActor.metaWindow.set_type(global.ssc.Meta.WindowType.NORMAL); true;")
+        eventually("global.ssc.bodyActor.get_effect('ssc-rounded-corners')?._bodyDetector?.revision >= 3")
+        unknown = capture('body-unknown-overlay')
+        crop = (slice(60,300),slice(60,800))
+        assert abs(unknown[crop]-utility[crop]).max() <= 1, 'Rejected normal overlay changed its appearance'
+        control('close')
+        evaluate("global.ssc.bodyBackground.destroy(); global.ssc.extension.disable(); true;")
+        print('GPU body detection matches explicit dialog bounds; utility bypass and unknown overlay preservation passed.', flush=True)
 
         print(run(["gjs", "-m", str(repo / "tests/compositor/native-radius-render.js")]), end="")
         log = (root / "cache/shell.log").read_text()

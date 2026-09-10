@@ -7,8 +7,10 @@ import GObject from 'gi://GObject';
 import Graphene from 'gi://Graphene';
 
 import {shadowGeometry} from './shadow-geometry.js';
+import {BodyDetector} from './body-detector.js';
 
 import {
+    BODY_DECLARATIONS,
     FILL_CODE,
     FILL_DECLARATIONS,
     ROUNDED_CODE,
@@ -67,7 +69,7 @@ export const RoundedCornersEffect = GObject.registerClass(
         _u: Record<
             'fillPadding' | 'sampleBounds' | 'bounds' | 'clipRadius' | 'borderWidth' |
             'borderColor' | 'borderedAreaBounds' | 'borderedAreaClipRadius' |
-            'exponent' | 'pixelStep' | 'textureOrigin', number
+            'exponent' | 'pixelStep' | 'textureOrigin' | 'bodyTextureStep' | 'bodyEnabled', number
         > | null = null;
         _pipeline: Cogl.Pipeline | null = null;
         _framebuffer: Cogl.Offscreen | null = null;
@@ -81,6 +83,11 @@ export const RoundedCornersEffect = GObject.registerClass(
         _purgeConnection = 0;
         _sample: [number, number, number, number] = [0, 0, 0, 0];
         _windowBounds = {x1: 0, y1: 0, x2: 0, y2: 0};
+        _detectBody = false;
+        _bodyFailed = false;
+        _bodyDetector: BodyDetector | null = null;
+        _bodyShadowTexture: Cogl.Texture | null = null;
+        _bodyShadowKey = '';
         _shadowEnabled = false;
         _shadowKey = '';
         _shadowGeneration = -1;
@@ -105,6 +112,11 @@ export const RoundedCornersEffect = GObject.registerClass(
             this._purgeConnection = 0;
             this._stage = null;
             this._shadowKey = '';
+            this._bodyDetector?.dispose();
+            this._bodyDetector = null;
+            this._bodyShadowTexture = null;
+            this._bodyShadowKey = '';
+            this._bodyFailed = false;
             this._framebuffer = null;
             this._pipeline = null;
             this._u = null;
@@ -147,6 +159,11 @@ export const RoundedCornersEffect = GObject.registerClass(
                 this._stage = stage;
                 this._purgeConnection = stage.connect('gl-video-memory-purged', () => {
                     clearShadowCache();
+                    this._bodyDetector?.dispose();
+                    this._bodyDetector = null;
+                    this._bodyShadowTexture = null;
+                    this._bodyShadowKey = '';
+                    this._bodyFailed = false;
                     this._framebuffer = null;
                     this._pipeline?.set_layer_null_texture(0);
                     this._shadowPipeline = null;
@@ -242,6 +259,19 @@ export const RoundedCornersEffect = GObject.registerClass(
             color.init_from_4f(opacity, opacity, opacity, opacity);
             this._pipeline.set_color(color);
 
+            this._ensureBodyDetector();
+            const detector = this._bodyDetector;
+            if (detector?.pending && !actor.is_in_clone_paint()) {
+                const capture = Clutter.LayerNode.new_to_framebuffer(framebuffer, this._pipeline);
+                capture.add_child(Clutter.ActorNode.new(actor, 255));
+                capture.paint(_context);
+                dirty = false;
+                const b = this._windowBounds;
+                detector.render(framebuffer.get_texture(), [b.x1, b.y1, b.x2, b.y2],
+                    scale, [originX, originY]);
+            }
+            this._bindBody(this._pipeline);
+
             if (this._shadowEnabled) this._ensureShadowPipeline();
             if (this._shadowEnabled && this._shadowPipeline && this._shadowUniforms) {
                 // Bake at monitor density, independent of overview zoom and
@@ -250,25 +280,44 @@ export const RoundedCornersEffect = GObject.registerClass(
                 const geometry = shadowGeometry(Math.max(0, x2 - x1), Math.max(0, y2 - y1),
                     this._shadowHoleRadius, this._shadowExponent,
                     this._shadowBlur, this._shadowSpread, this._paintScale);
-                let texture = shadowCache.get(geometry.key);
-                if (texture) {
+                // The CPU does not know GPU insets. If up to 64 logical pixels
+                // on each side could make corners overlap, bake the actual body
+                // in a private tile. Larger windows retain the shared tile path.
+                const direct = this._detectBody && (x2 - x1 < geometry.width + 128 ||
+                    y2 - y1 < geometry.height + 128);
+                if (direct) {
+                    geometry.width = Math.max(0, x2 - x1);
+                    geometry.height = Math.max(0, y2 - y1);
+                }
+                const directKey = [geometry.key, x2 - x1, y2 - y1,
+                    detector?.revision ?? -1, shadowGeneration].join(',');
+                let texture = direct ? this._bodyShadowKey === directKey
+                    ? this._bodyShadowTexture ?? undefined : undefined : shadowCache.get(geometry.key);
+                if (texture && !direct) {
                     shadowCache.delete(geometry.key);
                     shadowCache.set(geometry.key, texture);
-                } else if (this._shadowKey === geometry.key && this._shadowGeneration === shadowGeneration) {
+                } else if (!direct && this._shadowKey === geometry.key && this._shadowGeneration === shadowGeneration) {
                     // Active windows already retain this texture for painting.
                     // LRU eviction must not force them to rebake every frame.
                     texture = this._shadowPipeline.get_layer_texture(0);
-                } else {
-                    texture = this._renderShadowTexture(geometry) ?? undefined;
-                    if (texture) cacheShadow(geometry.key, texture);
+                } else if (!texture) {
+                    texture = this._renderShadowTexture(geometry, direct) ?? undefined;
+                    if (texture && direct) {
+                        this._bodyShadowKey = directKey;
+                        this._bodyShadowTexture = texture;
+                    } else if (texture) cacheShadow(geometry.key, texture);
                 }
+                if (!direct) this._bodyShadowTexture = null;
                 if (texture) {
                     const pipeline = this._shadowPipeline, u = this._shadowUniforms;
                     const [dx, dy] = this._shadowOffset;
                     const left = x1 + dx - geometry.margin, top = y1 + dy - geometry.margin;
                     const right = x2 + dx + geometry.margin, bottom = y2 + dy + geometry.margin;
                     pipeline.set_layer_texture(0, texture);
-                    this._shadowKey = geometry.key;
+                    this._bindBody(pipeline);
+                    // A private body tile must never satisfy shared-tile reuse
+                    // after a resize crosses the small-window threshold.
+                    this._shadowKey = direct ? '' : geometry.key;
                     this._shadowGeneration = shadowGeneration;
                     for (const [key, values] of Object.entries({
                         effectShadowOpacity: [this._shadowOpacity * opacity],
@@ -277,6 +326,7 @@ export const RoundedCornersEffect = GObject.registerClass(
                         effectShadowTileSize: [geometry.width, geometry.height],
                         effectShadowTextureSize: [texture.get_width() / this._paintScale,
                             texture.get_height() / this._paintScale],
+                        effectShadowDirect: [direct ? 1 : 0],
                         effectShadowMargin: [geometry.margin], effectShadowEdge: [geometry.edge],
                         effectShadowOffset: this._shadowOffset, bounds: this._shadowHole,
                         clipRadius: [this._shadowHoleRadius], exponent: [this._shadowExponent],
@@ -311,13 +361,20 @@ export const RoundedCornersEffect = GObject.registerClass(
             this._pipeline = Cogl.Pipeline.new(context);
             this._pipeline.set_blend('RGBA = ADD (SRC_COLOR, DST_COLOR * (1-SRC_COLOR[A]))');
             this._pipeline.set_layer_filters(0, Cogl.PipelineFilter.LINEAR, Cogl.PipelineFilter.LINEAR);
-            const fill = Cogl.Snippet.new(Cogl.SnippetHook.TEXTURE_LOOKUP, FILL_DECLARATIONS, null);
+            const fallback = Cogl.Texture2D.new_with_size(context, 1, 1);
+            fallback.allocate();
+            this._pipeline.set_layer_texture(1, fallback);
+            this._pipeline.set_layer_combine(1, 'RGBA = REPLACE (PREVIOUS)');
+            const fill = Cogl.Snippet.new(Cogl.SnippetHook.TEXTURE_LOOKUP,
+                BODY_DECLARATIONS + FILL_DECLARATIONS, null);
             fill.set_replace(FILL_CODE);
             this._pipeline.add_layer_snippet(0, fill);
             this._pipeline.add_snippet(Cogl.Snippet.new(
                 Cogl.SnippetHook.FRAGMENT, ROUNDED_DECLARATIONS, ROUNDED_CODE,
             ));
             this._u = {
+                bodyEnabled:            this._pipeline.get_uniform_location('bodyEnabled'),
+                bodyTextureStep:        this._pipeline.get_uniform_location('bodyTextureStep'),
                 fillPadding:            this._pipeline.get_uniform_location('fillPadding'),
                 sampleBounds:           this._pipeline.get_uniform_location('sampleBounds'),
                 bounds:                 this._pipeline.get_uniform_location('bounds'),
@@ -348,7 +405,7 @@ export const RoundedCornersEffect = GObject.registerClass(
             maskPipeline.set_color(color);
             maskPipeline.set_blend('RGBA = ADD (SRC_COLOR, DST_COLOR * (1-SRC_COLOR[A]))');
             maskPipeline.add_snippet(Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT,
-                EFFECT_SHADOW_MASK_DECLARATIONS, EFFECT_SHADOW_MASK_CODE));
+                BODY_DECLARATIONS + EFFECT_SHADOW_MASK_DECLARATIONS, EFFECT_SHADOW_MASK_CODE));
 
             const spreadPipeline = Cogl.Pipeline.new(context);
             spreadPipeline.set_layer_texture(0, coordinateTexture);
@@ -376,8 +433,13 @@ export const RoundedCornersEffect = GObject.registerClass(
             pipeline.set_color(color);
             pipeline.set_blend('RGBA = ADD (SRC_COLOR, DST_COLOR * (1-SRC_COLOR[A]))');
             pipeline.add_snippet(Cogl.Snippet.new(Cogl.SnippetHook.FRAGMENT,
-                ROUNDED_DECLARATIONS + EFFECT_SHADOW_DECLARATIONS, EFFECT_SHADOW_CODE));
+                BODY_DECLARATIONS + ROUNDED_DECLARATIONS + EFFECT_SHADOW_DECLARATIONS, EFFECT_SHADOW_CODE));
 
+            for (const p of [maskPipeline, pipeline]) {
+                p.set_layer_texture(1, coordinateTexture);
+                p.set_layer_combine(1, 'RGBA = REPLACE (PREVIOUS)');
+                p.set_layer_filters(1, Cogl.PipelineFilter.NEAREST, Cogl.PipelineFilter.NEAREST);
+            }
             this._shadowMaskPipeline = maskPipeline;
             this._shadowSpreadPipeline = spreadPipeline;
             this._shadowBlurPipeline = blurPipeline;
@@ -405,11 +467,11 @@ export const RoundedCornersEffect = GObject.registerClass(
             this._shadowUniforms = Object.fromEntries([
                 'effectShadowOpacity', 'effectShadowRectOrigin', 'effectShadowRectSize',
                 'effectShadowTileSize', 'effectShadowTextureSize', 'effectShadowMargin',
-                'effectShadowEdge', 'effectShadowOffset', 'bounds', 'clipRadius', 'exponent',
+                'effectShadowEdge', 'effectShadowDirect', 'effectShadowOffset', 'bounds', 'clipRadius', 'exponent',
             ].map(name => [name, pipeline.get_uniform_location(name)]));
         }
 
-        _renderShadowTexture(geometry: ReturnType<typeof shadowGeometry>): Cogl.Texture | null {
+        _renderShadowTexture(geometry: ReturnType<typeof shadowGeometry>, direct = false): Cogl.Texture | null {
             const maskPipeline = this._shadowMaskPipeline;
             const blurPipeline = this._shadowBlurPipeline;
             const spreadPipeline = this._shadowSpreadPipeline;
@@ -463,6 +525,7 @@ export const RoundedCornersEffect = GObject.registerClass(
                 pipeline.set_uniform_float(uniforms.textureBounds, 4, 1,
                     [0.5 / width, 0.5 / height, (activeWidth - 0.5) / width, (activeHeight - 0.5) / height]);
             };
+            this._bindBody(maskPipeline, direct);
             maskPipeline.set_uniform_float(maskUniforms.effectShadowHole, 4, 1,
                 [0, 0, geometry.width, geometry.height]);
             maskPipeline.set_uniform_float(maskUniforms.effectShadowHoleRadius, 1, 1,
@@ -529,9 +592,10 @@ export const RoundedCornersEffect = GObject.registerClass(
          * @param {number} paintScale   – actual monitor density, without rounding
          */
         updateUniforms(scaleFactor: number, cfg: CornerConfig, windowBounds: WindowBounds,
-            paintScale = 1, shadow?: ShadowConfig) {
+            paintScale = 1, shadow?: ShadowConfig, detectBody = false) {
             if (paintScale !== this._paintScale) this._framebuffer = null;
             this._paintScale = paintScale;
+            this._detectBody = detectBody;
             const {u, pipeline} = this._ensureUniforms();
 
             const bw     = cfg.borderWidth * scaleFactor;
@@ -551,6 +615,9 @@ export const RoundedCornersEffect = GObject.registerClass(
                 : sample;
             this._sample = sample;
             this._windowBounds = windowBounds;
+            this._ensureBodyDetector();
+            this._bodyDetector?.updateGeometry([windowBounds.x1, windowBounds.y1,
+                windowBounds.x2, windowBounds.y2], paintScale);
             const actorW = this.actor.get_width();
             const actorH = this.actor.get_height();
             const bb = [b[0] + bw, b[1] + bw, b[2] - bw, b[3] - bw];
@@ -600,6 +667,34 @@ export const RoundedCornersEffect = GObject.registerClass(
             this.queue_repaint();
         }
 
+        _ensureBodyDetector(): void {
+            if (!this._detectBody) {
+                this._bodyDetector?.dispose();
+                this._bodyDetector = null;
+                return;
+            }
+            if (this._bodyDetector || this._bodyFailed) return;
+            try {
+                const context = this.actor.get_context().get_backend().get_cogl_context();
+                this._bodyDetector = new BodyDetector(context, () => this.queue_repaint());
+            } catch (error) {
+                // Preserve the app if floating-point render targets are not
+                // supported; guessing a rectangle would change its shape.
+                console.error(`[SmoothShellCorners] Body detection unavailable: ${String(error)}`);
+                this._bodyFailed = true;
+            }
+        }
+
+        _bindBody(pipeline: Cogl.Pipeline, enabled = this._detectBody): void {
+            const detector = this._bodyDetector;
+            if (detector && enabled) {
+                pipeline.set_layer_texture(1, detector.texture);
+                pipeline.set_layer_filters(1, Cogl.PipelineFilter.NEAREST, Cogl.PipelineFilter.NEAREST);
+            }
+            pipeline.set_uniform_float(pipeline.get_uniform_location('bodyEnabled'), 1, 1,
+                [enabled ? detector ? 1 : 2 : 0]);
+        }
+
         _updateTextureMapping(width: number, height: number, originX: number, originY: number, scale = this._paintScale) {
             const {u, pipeline} = this._ensureUniforms();
             const bounds = this._windowBounds;
@@ -618,6 +713,7 @@ export const RoundedCornersEffect = GObject.registerClass(
                 sampleBounds[axis + 2] = Math.max(
                     Math.floor((this._sample[axis + 2] - origin) * scale) - 0.5, middle) / extent;
             }
+            pipeline.set_uniform_float(u.bodyTextureStep, 2, 1, [scale / width, scale / height]);
             pipeline.set_uniform_float(u.pixelStep, 2, 1, [scale / width, scale / height]);
             pipeline.set_uniform_float(u.textureOrigin, 2, 1, [originX, originY]);
             pipeline.set_uniform_float(u.sampleBounds, 4, 1, sampleBounds);

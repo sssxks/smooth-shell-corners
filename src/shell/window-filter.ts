@@ -14,9 +14,6 @@ const ROUNDABLE_WINDOW_TYPES = [
     Meta.WindowType.NORMAL,
     Meta.WindowType.DIALOG,
     Meta.WindowType.MODAL_DIALOG,
-    Meta.WindowType.UTILITY,
-    Meta.WindowType.SPLASHSCREEN,
-    Meta.WindowType.TOOLBAR,
 ].filter(type => type !== undefined);
 
 export function normalizeAppId(value: unknown): string {

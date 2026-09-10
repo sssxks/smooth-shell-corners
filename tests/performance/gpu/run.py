@@ -96,6 +96,7 @@ def main():
     parser.add_argument('--modes', nargs='+', choices=['off', 'corners', 'shadows'], default=['off', 'corners', 'shadows'])
     parser.add_argument('--no-timers', action='store_true', help='Measure instrumentation overhead using DRM counters')
     parser.add_argument('--resize', action='store_true', help='Repeat resize and idle spans, then diagnostic GC')
+    parser.add_argument('--body', action='store_true', help='Use transparent native margins around a rectangular body')
     args = parser.parse_args()
     checkout = args.checkout.resolve()
     signal.signal(signal.SIGTERM, interrupt)
@@ -111,7 +112,8 @@ def main():
     shutil.make_archive(str(output/'extension'), 'zip', checkout/'dist')
     protocol_paths = [suite/name for name in ['timer.rs', 'probe.js', 'fixture.js', 'run.py']]
     metadata = {'commit': commit, 'status': run(['git', 'status', '--short'], cwd=checkout),
-        'timers': not args.no_timers, 'kernel': os.uname().release,
+        'timers': not args.no_timers, 'body': args.body, 'resize': args.resize,
+        'kernel': os.uname().release,
         'packages': run(['rpm', '-q', 'mutter', 'gjs', 'mesa-dri-drivers']),
         'protocol_sha256': hashlib.sha256(b''.join(p.read_bytes() for p in protocol_paths)).hexdigest(),
         'extension_sha256': hashlib.sha256((output/'extension.zip').read_bytes()).hexdigest()}
@@ -123,6 +125,7 @@ def main():
         env = os.environ | {'GSETTINGS_BACKEND': 'keyfile', 'DISPLAY': '', 'WAYLAND_DISPLAY': 'ssc-gpu',
                            'GDK_BACKEND': 'wayland', 'SSC_GPU_CHECKOUT': str(checkout),
                            'SSC_GPU_RESIZE': '1' if args.resize else '0',
+                           'SSC_GPU_BODY': '1' if args.body else '0',
                            'SSC_GPU_TRACE': str(output/'draws.csv')}
         for key, name in [('XDG_CONFIG_HOME', 'config'), ('XDG_DATA_HOME', 'data'),
                           ('XDG_CACHE_HOME', 'cache'), ('XDG_RUNTIME_DIR', 'runtime')]:
