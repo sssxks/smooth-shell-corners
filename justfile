@@ -26,6 +26,13 @@ benchmark: benchmark-check
 benchmark-check:
     uv run --python 3.13 tests/performance/test_capture.py
 
+# RX 7900 XT / Bazzite: real GL timestamps and per-process GPU engine counters.
+profile-gpu: profile-gpu-check
+    timeout 150s uv run tests/performance/gpu/run.py
+
+profile-gpu-check:
+    timeout 60s uv run tests/performance/gpu/test_analysis.py
+
 # Exercise actual pointer events and overview chrome in a private Shell.
 test-hover:
     timeout 180s uv run tests/performance/hover.py

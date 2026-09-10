@@ -1,5 +1,9 @@
 # Blur and spread follow-up (Bazzite / GNOME 50, 2026-09-10)
 
+Subsequent [GPU profiling and bisection](../performance/gpu/results.md) found
+a severe GPU regression at `55c53b9` that the CPU measurements below missed:
+2.34% → 36.86% graphics-engine use in the fixed 4K damage workload.
+
 Commit `55c53b9` fixed blur-dependent silhouette jumps by keeping the working
 textures at paint resolution. Its predecessor resized a binary mask as blur
 changed, shifting the apparent edge. Retaining the stable grid is necessary

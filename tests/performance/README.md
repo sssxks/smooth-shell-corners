@@ -1,5 +1,9 @@
 # Automated Overview benchmark
 
+For actual GPU timestamps, pass attribution and regression bisection, use
+[the GPU profiler](gpu/README.md). The Overview benchmark below measures
+CPU-side elapsed scopes.
+
 For the Overview pointer-hover regression, run `just test-hover`. This uses
 the same private GNOME 50 session and six-window fixture, with actual virtual
 pointer input at 40 ms and 2 ms intervals. It checks preview entry latency,
