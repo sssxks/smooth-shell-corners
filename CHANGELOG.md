@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.3 — cleanup and settings fixes
+
+- Restore managed GTK4 CSS before disable returns, cancel pending updates, and
+  preserve user edits. Process host CSS even when Flatpak discovery fails.
+- Keep toolkit detection cached across settings changes to avoid temporarily
+  losing window effects; release detection state when the last process window closes.
+- Release custom shadow resources when disabled and avoid repeated allocation
+  retries after a rendering failure until resources are reset.
+- Keep application exception editors synchronized with settings and correct
+  preference control updates.
+
 ## 0.1.2 — rendering and Shell responsiveness
 
 - Detect the visible window body on the GPU so native transparent margins are
