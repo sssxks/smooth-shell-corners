@@ -412,6 +412,9 @@ export const RoundedCornersEffect = GObject.registerClass(
 
             // Ping-pong both filters through the existing pair of targets.
             // Overwrite blending is required because each target is reused.
+            // Cogl queues rectangles. Submit each consumer before overwriting
+            // its input, otherwise the journals acquire circular dependencies
+            // and spread can disappear. flush() does not wait for GPU completion.
             if (this._shadowSpread !== 0) {
                 spreadPipeline.set_layer_texture(0, maskFramebuffer.get_texture());
                 spreadPipeline.set_uniform_float(spreadUniforms.step, 2, 1, [1 / width, 0]);
@@ -419,12 +422,14 @@ export const RoundedCornersEffect = GObject.registerClass(
                     [this._shadowSpread * width / rectWidth]);
                 blurFramebuffer.draw_rectangle(spreadPipeline, -SHADOW_PADDING, -SHADOW_PADDING,
                     actorWidth + SHADOW_PADDING, actorHeight + SHADOW_PADDING);
+                blurFramebuffer.flush();
                 spreadPipeline.set_layer_texture(0, blurFramebuffer.get_texture());
                 spreadPipeline.set_uniform_float(spreadUniforms.step, 2, 1, [0, 1 / height]);
                 spreadPipeline.set_uniform_float(spreadUniforms.pixels, 1, 1,
                     [this._shadowSpread * height / rectHeight]);
                 maskFramebuffer.draw_rectangle(spreadPipeline, -SHADOW_PADDING, -SHADOW_PADDING,
                     actorWidth + SHADOW_PADDING, actorHeight + SHADOW_PADDING);
+                if (blur > 0) maskFramebuffer.flush();
             }
             if (blur > 0) {
                 blurPipeline.set_layer_texture(0, maskFramebuffer.get_texture());
@@ -434,6 +439,7 @@ export const RoundedCornersEffect = GObject.registerClass(
                     [blur * width / rectWidth]);
                 blurFramebuffer.draw_rectangle(blurPipeline, -SHADOW_PADDING, -SHADOW_PADDING,
                     actorWidth + SHADOW_PADDING, actorHeight + SHADOW_PADDING);
+                blurFramebuffer.flush();
                 blurPipeline.set_layer_texture(0, blurFramebuffer.get_texture());
                 blurPipeline.set_uniform_float(blurUniforms.effectShadowBlurUvStep, 2, 1,
                     [0, 1 / height]);

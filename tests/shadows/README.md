@@ -1,5 +1,9 @@
 # Shadow calibration (Bazzite / GNOME 50)
 
+For the stable blur, spread-ordering fix and performance comparison, see
+[the blur/spread follow-up](blur-spread.md). The calibration figures below
+describe the earlier renderer.
+
 Run `just calibrate-shadows`. The runner uses GTK/GSK to render the normal
 window shadow layers from the installed libadwaita version's source, then
 fits the extension's **actual GLSL** using the existing EGL test harness.

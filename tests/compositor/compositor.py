@@ -310,9 +310,31 @@ export default class Probe {{
                             edge, profile[max(0, peak-2):peak+4].tolist())
         print("Shadow edge continuity passed at 100%, 125%, 150% and 200%.", flush=True)
 
+        # Exercise the queued Cogl passes together. The immediate EGL harness
+        # cannot detect spread being lost when a framebuffer is reused too soon.
+        for scale in [1, 1.5]:
+            control("scale", scale)
+            for blur in [0, 24]:
+                masses = []
+                for spread in [-12, 0, 12]:
+                    evaluate(f"global.ssc.makeShadow(true, {blur}, {spread}, 0, 0, {scale})")
+                    shot = capture("shadow-spread")
+                    left, top = round(201*scale), round(201*scale)
+                    cx, cy = round(351*scale), round(321*scale)
+                    profiles = [shot[cy, left-round(60*scale):left, 0],
+                                shot[top-round(60*scale):top, cx, 0]]
+                    masses.append([(255-profile).sum() / (255*scale) for profile in profiles])
+                print(f"Spread exterior coverage: scale={scale}, blur={blur}: {masses}", flush=True)
+                for axis in range(2):
+                    assert masses[2][axis] > masses[1][axis] + 4, (scale, blur, axis, masses)
+                    if blur:
+                        assert masses[1][axis] > masses[0][axis] + 1.5, (scale, blur, axis, masses)
+        print("Positive and negative spread affect both axes with blur enabled.", flush=True)
+
         print(run(["gjs", "-m", str(repo / "tests/compositor/native-radius-render.js")]), end="")
         log = (root / "cache/shell.log").read_text()
         assert "JS ERROR" not in log, log[-10000:]
+        assert "_cogl_framebuffer_add_dependency" not in log, log[-10000:]
         (repo / "dist").mkdir(exist_ok=True)
         artifacts = repo / "tests/artifacts"
         artifacts.mkdir(exist_ok=True)

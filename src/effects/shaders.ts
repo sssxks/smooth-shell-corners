@@ -178,15 +178,20 @@ export const EFFECT_SHADOW_BLUR_CODE = /* glsl */`
     if (effectShadowBlurUvStep == vec2(0.0)) {
         cogl_color_out = texture2D(cogl_sampler0, cogl_tex_coord_in[0].xy);
     } else {
-        float alpha = 0.0;
-        float total = 0.0;
+        float alpha = texture2D(cogl_sampler0, cogl_tex_coord_in[0].xy).a;
+        float total = 1.0;
         int radius = int(ceil(effectShadowBlurPixels));
-        for (int tap = -radius; tap <= radius; tap++) {
-            float weight = effectGaussianWeight(tap);
-            vec2 uv = cogl_tex_coord_in[0].xy +
-                float(tap) * effectShadowBlurUvStep;
-            alpha += texture2D(cogl_sampler0, uv).a * weight;
-            total += weight;
+        // Linear filtering combines two adjacent weighted texels in one
+        // lookup. Mirror each pair to preserve the exact Gaussian kernel.
+        for (int tap = 1; tap <= radius; tap += 2) {
+            float first = effectGaussianWeight(tap);
+            float second = tap < radius ? effectGaussianWeight(tap + 1) : 0.0;
+            float weight = first + second;
+            if (weight == 0.0) break;
+            vec2 offset = (float(tap) + second / weight) * effectShadowBlurUvStep;
+            alpha += (texture2D(cogl_sampler0, cogl_tex_coord_in[0].xy - offset).a +
+                      texture2D(cogl_sampler0, cogl_tex_coord_in[0].xy + offset).a) * weight;
+            total += 2.0 * weight;
         }
         alpha /= total;
         cogl_color_out = vec4(alpha, alpha, alpha, alpha);

@@ -249,6 +249,34 @@ print('Opaque silhouette blur is monotonic and free of sparse-sampling steps.')
 # rather than only an opaque rectangle that hides incorrect spread/fill.
 
 class ShadowRegressions(unittest.TestCase):
+    def test_paired_blur_matches_discrete_gaussian(self):
+        # An independent CPU convolution checks the optimized GPU filter,
+        # including fractional radii, odd/even support and clamped borders.
+        size = 67
+        pixels = np.random.default_rng(42).integers(0, 256, (size, size), dtype=np.uint8)
+        source = ctx.texture((size, size), 4, np.repeat(pixels[:, :, None], 4, axis=2).tobytes())
+        source.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        source.repeat_x = source.repeat_y = False
+        target = ctx.simple_framebuffer((size, size), components=4)
+        try:
+            for radius in [0.05, 0.5, 1, 2, 3.5, 24, 25, 26, 120, 240]:
+                for axis, step in [(0, (0, 1/size)), (1, (1/size, 0))]:
+                    with self.subTest(radius=radius, axis=axis):
+                        target.use()
+                        source.use(location=0)
+                        shadow_blur_program['effectShadowBlurUvStep'].value = step
+                        shadow_blur_program['effectShadowBlurPixels'].value = radius
+                        shadow_blur_vao.render(vertices=3)
+                        actual = np.frombuffer(target.read(components=4), dtype=np.uint8).reshape(size, size, 4)[:, :, 3]
+                        taps = np.arange(-int(np.ceil(radius)), int(np.ceil(radius))+1)
+                        weights = np.exp(-4.5 * (taps/radius)**2)
+                        expected = sum(weight * np.take(pixels, np.clip(np.arange(size)+tap, 0, size-1), axis=axis)
+                                       for tap, weight in zip(taps, weights)) / weights.sum()
+                        self.assertLessEqual(float(np.abs(actual.astype(float)-expected).max()), 1.0)
+        finally:
+            target.release()
+            source.release()
+
     def test_increasing_blur_does_not_shrink_exterior_shadow(self):
         pixels = bytes([0, 0, 0, 255]) * 64 * 64
         values = dict(effectShadowHole=(64, 64, 320, 320), effectShadowHoleRadius=12,
