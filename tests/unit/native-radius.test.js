@@ -18,6 +18,12 @@ function read(path) {
     return new TextDecoder('utf-8', {ignoreBOM: true}).decode(GLib.file_get_contents(path)[1]);
 }
 
+async function collect(paths) {
+    const result = [];
+    for await (const path of paths) result.push(path);
+    return result;
+}
+
 function removeTree(file) {
     if (file.query_file_type(Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null) === Gio.FileType.DIRECTORY) {
         const entries = file.enumerate_children('standard::name', Gio.FileQueryInfoFlags.NONE, null);
@@ -35,9 +41,9 @@ try {
     GLib.mkdir_with_parents(`${flatpaks}/org.example.App/config`, 0o700);
     GLib.file_set_contents(`${flatpaks}/not-an-app`, '');
     Gio.File.new_for_path(`${flatpaks}/linked-app`).make_symbolic_link(`${flatpaks}/org.example.App`, null);
-    const paths = await nativeCssFiles(config, flatpaks);
+    const paths = await collect(nativeCssFiles(config, flatpaks));
     assert(paths.length === 2, 'Discover host and real Flatpak directories only');
-    assert((await nativeCssFiles(config, `${root}/missing`)).length === 1, 'Missing Flatpak root is supported');
+    assert((await collect(nativeCssFiles(config, `${root}/missing`))).length === 1, 'Missing Flatpak root is supported');
 
     // Do not create config files just because the extension is enabled with
     // removal off, or during uninstall on a machine that never used removal.
@@ -85,6 +91,27 @@ try {
         Array.from(new TextEncoder().encode(originals[3])).join(),
     'Rapid toggles finish with cleanup and preserve user CSS');
     assert(read(paths[1]) === '', 'Rapid toggles leave no Flatpak override');
+
+    // A file in place of the Flatpak root deterministically fails enumeration,
+    // including in CI running as root. Host restoration must still complete.
+    const brokenRoot = `${root}/broken-flatpaks`;
+    GLib.file_set_contents(brokenRoot, 'not a directory');
+    const hostCss = '/* host CSS survives discovery errors */';
+    GLib.file_set_contents(paths[0], hostCss);
+    await setNativeRadiusRemoved(true, [paths[0]]);
+    await throws(() => setNativeRadiusRemoved(false, nativeCssFiles(config, brokenRoot)),
+        'Flatpak discovery errors are reported after host cleanup');
+    assert(read(paths[0]) === hostCss, 'Discovery failure must not leave the host override behind');
+
+    await setNativeRadiusRemoved(true, paths);
+    async function* interruptedDiscovery() {
+        yield* paths;
+        throw new Error('Enumeration interrupted after a batch');
+    }
+    await throws(() => setNativeRadiusRemoved(false, interruptedDiscovery()),
+        'Late discovery errors are reported');
+    assert(read(paths[0]) === hostCss && read(paths[1]) === '',
+        'All files discovered before an error are restored');
 
     const malformed = enabled.replace('END Smooth', 'EDITED Smooth');
     GLib.file_set_contents(paths[0], malformed);

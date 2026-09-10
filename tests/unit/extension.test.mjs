@@ -123,8 +123,11 @@ function setupWindowLifecycle(ready = true) {
         get_texture() { return ready ? this : null; },
     });
     const windowManager = emitter();
-    class Timeline {}
-    const timeline = Object.assign(new Timeline(), emitter());
+    const timeline = emitter();
+    const settings = {...emitter(), get_boolean: key => key === 'custom-shadow'};
+    const timers = new Map();
+    let nextTimer = 0;
+    let toolkitCached = true;
     const actors = [actor];
     const config = {customShadow: true, keepShadowMaximized: false, focusedShadow: {opacity: 115}, unfocusedShadow: {opacity: 18}};
     const state = vm.runInNewContext(`${source}
@@ -134,22 +137,31 @@ function setupWindowLifecycle(ready = true) {
         ({disable: disableEffect, tracked: () => _actorMap.size});
     `, {
         Extension: class {},
-        settings: {...emitter(), get_boolean: key => key === 'custom-shadow'},
+        settings,
         readConfig: () => config,
         computeWindowBounds: () => ({}),
         global: {get_window_actors: () => actors, display: {...emitter(), get_monitor_scale: () => 1}, windowManager},
         Main: {layoutManager: emitter()},
-        Clutter: {Timeline},
+        GLib: {PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false,
+            timeout_add(_priority, _delay, callback) { timers.set(++nextTimer, callback); return nextTimer; },
+            source_remove(id) { timers.delete(id); }},
         RoundedCornersEffect: class { updateUniforms(...args) { this.shadow = args[4]; } },
-        shouldSkipWindow: () => false,
-        clearWindowFilterCache() {},
+        shouldSkipWindow: () => !toolkitCached,
+        clearWindowFilterCache() { toolkitCached = false; },
         clearShadowCache() {},
         disconnectSignals(connections) {
             for (const {object, id} of connections) object.disconnect(id);
             connections.length = 0;
         },
     });
-    return {...state, actor, config, actors, windowManager, timeline, ready() { ready = true; actor.emit('notify::size'); }};
+    return {...state, actor, config, actors, windowManager, timeline, settings,
+        toolkitCached: () => toolkitCached,
+        tick() {
+            const callbacks = [...timers.values()];
+            timers.clear();
+            callbacks.forEach(callback => callback());
+        },
+        ready() { ready = true; actor.emit('notify::size'); }};
 }
 
 for (const finish of ['destroy', 'disable']) {
@@ -193,24 +205,35 @@ test('late texture becomes rounded without reconnecting the window', () => {
     state.disable();
 });
 
-for (const finish of ['completed', 'disable']) {
-    test(`Magic Lamp completion is owned until ${finish}`, () => {
+for (const lamp of [false, true]) {
+    test(`minimize and restore preserve the enabled effect with Magic Lamp ${lamp ? 'on' : 'off'}`, () => {
         const state = setupWindowLifecycle();
-        state.actor.effects.set('unminimize-magic-lamp-effect', {timerId: state.timeline});
+        const effect = state.actor.get_effect('ssc-rounded-corners');
+        if (lamp) state.actor.effects.set('unminimize-magic-lamp-effect', {timerId: state.timeline});
         state.windowManager.emit('minimize', state.actor);
+        assert.equal(effect.enabled, true);
         state.windowManager.emit('unminimize', state.actor);
-        assert.equal(state.timeline.callbacks.size, 1);
-        if (finish === 'completed') {
-            state.timeline.emit('completed');
-            assert.equal(state.actor.get_effect('ssc-rounded-corners').enabled, true);
-        } else {
-            state.disable();
-            state.timeline.emit('completed');
-        }
+        state.timeline.emit('completed');
+        assert.equal(state.actor.get_effect('ssc-rounded-corners'), effect);
+        assert.equal(effect.enabled, true);
         assert.equal(state.timeline.callbacks.size, 0);
         state.disable();
     });
 }
+
+test('settings refresh preserves detected windows and disable clears toolkit detection', () => {
+    const state = setupWindowLifecycle();
+    const effect = state.actor.get_effect('ssc-rounded-corners');
+    for (const key of ['corner-radius', 'shadow-strength', 'debug-mode', 'blacklist', 'skip-libhandy-app']) {
+        state.settings.emit('changed', key);
+        state.tick();
+        assert.equal(state.actor.get_effect('ssc-rounded-corners'), effect, key);
+        assert.equal(effect.enabled, true);
+        assert.equal(state.toolkitCached(), true);
+    }
+    state.disable();
+    assert.equal(state.toolkitCached(), false);
+});
 
 test('maximised and fullscreen shadows follow the setting independently of corners', () => {
     const s = setupWindowLifecycle();

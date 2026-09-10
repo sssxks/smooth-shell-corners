@@ -1,6 +1,5 @@
 // Window tracking outlives temporary exclusions; actor destruction and disable own cleanup.
 import Gio from 'gi://Gio';
-import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 
@@ -21,7 +20,6 @@ const ROUNDED_CORNERS_EFFECT = 'ssc-rounded-corners';
 
 interface ActorData {
     connections: SignalConnection[];
-    animationConnections: SignalConnection[];
 }
 
 let _settings: Gio.Settings | null = null;
@@ -100,11 +98,6 @@ function onRemoveEffect(actor: Meta.WindowActor) {
     } catch (_) {
         // Actor may already be destroyed
     }
-
-    const data = _actorMap.get(actor);
-    if (!data) return;
-
-    disconnectSignals(data.animationConnections);
 }
 
 /** Recompute and push all shader uniforms for a single window. */
@@ -177,7 +170,7 @@ function applyEffectTo(actor: Meta.WindowActor) {
 
     if (!_actorMap.has(actor)) {
         _actorMap.set(actor, {
-            connections: [], animationConnections: [],
+            connections: [],
         });
         attachWindowSignals(actor);
     }
@@ -220,34 +213,6 @@ function enableEffect() {
         if (actor) refreshRoundedCorners(actor);
     })});
 
-    // Keep the effect active during minimize animations.
-    _connections.push({object: global.windowManager, id: global.windowManager.connect('minimize', (_, actor) => {
-            const data = _actorMap.get(actor);
-            if (data) disconnectSignals(data.animationConnections);
-        })});
-
-    // Unminimise: keep the effect active through the animation.
-    _connections.push({object: global.windowManager, id: global.windowManager.connect('unminimize', (_, actor) => {
-            const data = _actorMap.get(actor);
-            const fx   = getEffect(actor);
-
-            if (data) disconnectSignals(data.animationConnections);
-            const lamp = actor.get_effect('unminimize-magic-lamp-effect');
-            const timer = lamp && 'timerId' in lamp && lamp.timerId instanceof Clutter.Timeline
-                ? lamp.timerId : null;
-            if (timer && fx && data) {
-                const animationData = data;
-                animationData.animationConnections.push({object: timer, id: timer.connect('completed', () => {
-                    disconnectSignals(animationData.animationConnections);
-                    fx.enabled = true;
-                })});
-                return;
-            }
-
-            // Standard unminimise (no magic lamp)
-            if (fx) fx.enabled = true;
-        })});
-
     // Settings changed → reapply all with debounce to prevent slider lag
     _connections.push({object: settings, id: settings.connect('changed', () => {
         if (_settingsTimeoutId) {
@@ -255,7 +220,8 @@ function enableEffect() {
             _settingsTimeoutId = 0;
         }
         _settingsTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
-            clearWindowFilterCache();
+            // Appearance and filter settings do not change a process's toolkit.
+            // Keep cached detection so refreshing cannot briefly exclude it.
             refreshAll();
             _settingsTimeoutId = 0;
             return GLib.SOURCE_REMOVE;

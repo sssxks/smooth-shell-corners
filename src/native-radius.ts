@@ -32,18 +32,19 @@ export function updateCss(css: string, enabled: boolean): string {
     return enabled ? css + BEGIN + NATIVE_RADIUS_CSS + END : css;
 }
 
-export async function nativeCssFiles(
+export async function* nativeCssFiles(
     configHome = GLib.get_user_config_dir(),
     flatpakHome = GLib.build_filenamev([GLib.get_home_dir(), '.var', 'app']),
 ) {
-    const paths = [GLib.build_filenamev([configHome, 'gtk-4.0', 'gtk.css'])];
+    // Yield the host first so Flatpak discovery cannot prevent its cleanup.
+    yield GLib.build_filenamev([configHome, 'gtk-4.0', 'gtk.css']);
     const flatpaks = Gio.File.new_for_path(flatpakHome);
     let entries;
     try {
         entries = await flatpaks.enumerate_children_async('standard::name,standard::type',
             Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, GLib.PRIORITY_DEFAULT, null);
     } catch (error) {
-        if (error instanceof GLib.Error && error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND)) return paths;
+        if (error instanceof GLib.Error && error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND)) return;
         throw error;
     }
     try {
@@ -52,15 +53,14 @@ export async function nativeCssFiles(
             if (!batch.length) break;
             for (const entry of batch) {
                 if (entry.get_file_type() === Gio.FileType.DIRECTORY)
-                    paths.push(GLib.build_filenamev([
+                    yield GLib.build_filenamev([
                         flatpakHome, entry.get_name(), 'config', 'gtk-4.0', 'gtk.css',
-                    ]));
+                    ]);
             }
         }
     } finally {
         await entries.close_async(GLib.PRIORITY_DEFAULT, null);
     }
-    return paths;
 }
 
 // Gio has no asynchronous make_directory_with_parents variant.
@@ -83,7 +83,7 @@ async function makeParents(directory: Gio.File): Promise<void> {
 
 // Serialize toggles, rollback and disable cleanup, including across re-enables.
 let pendingUpdate = Promise.resolve();
-export function setNativeRadiusRemoved(enabled: boolean, paths?: string[]): Promise<void> {
+export function setNativeRadiusRemoved(enabled: boolean, paths?: Iterable<string> | AsyncIterable<string>): Promise<void> {
     const update = pendingUpdate.then(() => writeNativeRadius(enabled, paths));
     pendingUpdate = update.catch(() => {});
     return update;
@@ -91,42 +91,46 @@ export function setNativeRadiusRemoved(enabled: boolean, paths?: string[]): Prom
 
 // Keep this independent of Shell so uninstall and tests use the same cleanup.
 // Read the current contents each time, preserving edits made while enabled.
-async function writeNativeRadius(enabled: boolean, paths?: string[]) {
+async function writeNativeRadius(enabled: boolean, paths: Iterable<string> | AsyncIterable<string> = nativeCssFiles()) {
     const errors = [];
-    for (const path of paths ?? await nativeCssFiles()) {
-        try {
-            const file = Gio.File.new_for_path(path);
-            let css = '', etag = null;
+    try {
+        for await (const path of paths) {
             try {
-                const [bytes, loadedEtag] = await file.load_contents_async(null);
-                // GJS versions differ in their interpretation of ignoreBOM.
-                const bom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
-                css = (bom ? '\uFEFF' : '') + new TextDecoder('utf-8', {fatal: true})
-                    .decode(bom ? bytes.subarray(3) : bytes);
-                etag = loadedEtag;
+                const file = Gio.File.new_for_path(path);
+                let css = '', etag = null;
+                try {
+                    const [bytes, loadedEtag] = await file.load_contents_async(null);
+                    // GJS versions differ in their interpretation of ignoreBOM.
+                    const bom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
+                    css = (bom ? '\uFEFF' : '') + new TextDecoder('utf-8', {fatal: true})
+                        .decode(bom ? bytes.subarray(3) : bytes);
+                    etag = loadedEtag;
+                } catch (error) {
+                    if (!(error instanceof GLib.Error && error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND))) throw error;
+                    if (!enabled) continue;
+                }
+                const updated = updateCss(css, enabled);
+                if (updated === css) continue;
+                if (enabled) await makeParents(file.get_parent()!);
+                // Atomic replacement plus the etag prevents overwriting concurrent
+                // edits. An empty file after cleanup is harmless and avoids a
+                // separate read/delete race with a user's editor.
+                if (updated.length) {
+                    await file.replace_contents_bytes_async(new GLib.Bytes(new TextEncoder().encode(updated)), etag, false,
+                        Gio.FileCreateFlags.NONE, null);
+                } else {
+                    // Empty GLib.Bytes can supply a null buffer to GIO's async
+                    // writer. Closing a replacement stream commits an empty file.
+                    const stream = await file.replace_async(etag, false, Gio.FileCreateFlags.NONE,
+                        GLib.PRIORITY_DEFAULT, null);
+                    await stream.close_async(GLib.PRIORITY_DEFAULT, null);
+                }
             } catch (error) {
-                if (!(error instanceof GLib.Error && error.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND))) throw error;
-                if (!enabled) continue;
+                errors.push(`${path}: ${String(error)}`);
             }
-            const updated = updateCss(css, enabled);
-            if (updated === css) continue;
-            if (enabled) await makeParents(file.get_parent()!);
-            // Atomic replacement plus the etag prevents overwriting concurrent
-            // edits. An empty file after cleanup is harmless and avoids a
-            // separate read/delete race with a user's editor.
-            if (updated.length) {
-                await file.replace_contents_bytes_async(new GLib.Bytes(new TextEncoder().encode(updated)), etag, false,
-                    Gio.FileCreateFlags.NONE, null);
-            } else {
-                // Empty GLib.Bytes can supply a null buffer to GIO's async
-                // writer. Closing a replacement stream commits an empty file.
-                const stream = await file.replace_async(etag, false, Gio.FileCreateFlags.NONE,
-                    GLib.PRIORITY_DEFAULT, null);
-                await stream.close_async(GLib.PRIORITY_DEFAULT, null);
-            }
-        } catch (error) {
-            errors.push(`${path}: ${String(error)}`);
         }
+    } catch (error) {
+        errors.push(`CSS discovery: ${String(error)}`);
     }
     // Attempt every file even if one fails, especially during cleanup.
     if (errors.length) throw new Error(errors.join('\n'));

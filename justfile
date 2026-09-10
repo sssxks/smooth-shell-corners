@@ -10,9 +10,8 @@ build:
 
 check:
     npm run check
-    npm run test:gjs
 
-install: build
+install:
     ./install.sh
 
 pack: build

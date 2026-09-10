@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "bash scripts/build.sh",
-    "check": "npm run typecheck && npm run lint && npm run build && npm test",
+    "check": "npm run typecheck && npm run lint && npm run build && npm run test:all",
     "lint": "eslint .",
     "test": "node --test tests/unit/*.test.mjs",
     "test:gjs": "gjs -m tests/unit/native-radius.test.js && gjs -m tests/unit/preferences.test.js",
