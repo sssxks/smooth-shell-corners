@@ -19,5 +19,15 @@ pack: build
     rm -f smooth-shell-corners@xks.shell-extension.zip
     cd dist && zip -9r ../smooth-shell-corners@xks.shell-extension.zip .
 
+# Bazzite / GNOME 50; builds the checkout and benchmarks a private Shell.
+benchmark: benchmark-check
+    timeout 240s uv run tests/performance/run.py
+
+benchmark-check:
+    uv run --python 3.13 tests/performance/test_capture.py
+
+benchmark-compare before after:
+    uv run tests/performance/compare.py '{{before}}' '{{after}}'
+
 clean:
     rm -rf dist smooth-shell-corners@xks.shell-extension.zip

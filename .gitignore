@@ -5,3 +5,4 @@ dist/
 node_modules/
 *.shell-extension.zip
 tests/artifacts/
+__pycache__/

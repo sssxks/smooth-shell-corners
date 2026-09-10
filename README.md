@@ -377,6 +377,13 @@ where `e = smoothing × 10 + 2` (2 = circle, 12 = squircle).
 
 ## Development checks
 
+For a repeatable performance comparison, run `just benchmark`. It builds the
+checkout and measures scripted Overview transitions with six fixed windows in
+a private GNOME Shell 50 session, comparing extension off, corners only, and
+custom shadows across three balanced rounds. It saves raw Sysprof captures and
+JSON results for `just benchmark-compare BEFORE/results.json AFTER/results.json`.
+See [the benchmark guide](tests/performance/README.md) for methodology and limits.
+
 ```bash
 just check
 gjs -m tests/unit/native-radius.test.js
