@@ -166,9 +166,10 @@ export const EFFECT_SHADOW_SPREAD_CODE = /* glsl */`
 // Horizontal and vertical blur use the same normalized Gaussian weights.
 export const EFFECT_SHADOW_BLUR_DECLARATIONS = /* glsl */`
 uniform vec2 effectShadowBlurUvStep;
+uniform float effectShadowBlurPixels;
 
 float effectGaussianWeight(int tap) {
-    float x = float(tap);
+    float x = float(tap) * 4.0 / effectShadowBlurPixels;
     return exp(-0.28125 * x * x);
 }
 `;
@@ -179,7 +180,8 @@ export const EFFECT_SHADOW_BLUR_CODE = /* glsl */`
     } else {
         float alpha = 0.0;
         float total = 0.0;
-        for (int tap = -4; tap <= 4; tap++) {
+        int radius = int(ceil(effectShadowBlurPixels));
+        for (int tap = -radius; tap <= radius; tap++) {
             float weight = effectGaussianWeight(tap);
             vec2 uv = cogl_tex_coord_in[0].xy +
                 float(tap) * effectShadowBlurUvStep;

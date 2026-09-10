@@ -198,10 +198,11 @@ def render_shadow(pixels, values, size=64, work_size=64, spread=0, blur_step=0, 
             shadow_spread_program['effectShadowSpreadPixels'].value = spread * work_size / rect_size
             shadow_spread_vao.render(vertices=3)
     if blur_step:
-        for axis, step in enumerate([(blur_step/rect_size, 0), (0, blur_step/rect_size)]):
+        for axis, step in enumerate([(1/work_size, 0), (0, 1/work_size)]):
             targets[1-axis].use()
             textures[axis].use(location=0)
             shadow_blur_program['effectShadowBlurUvStep'].value = step
+            shadow_blur_program['effectShadowBlurPixels'].value = blur_step * 4 * work_size / rect_size
             shadow_blur_vao.render(vertices=3)
     output.use()
     textures[0].use(location=0)
@@ -222,8 +223,7 @@ for scale in [1, 1.25, 1.5, 2]:
     size = round(64 * scale)
     blur = 8
     blur_step = blur / 4
-    downsample = max(1, blur_step * scale)
-    work_size = round(64 * scale / downsample)
+    work_size = size
     for exponent in [2, 8, 12]:
         values = dict(effectShadowHole=(0, 0, 64, 64), effectShadowHoleRadius=12,
                       effectShadowExp=exponent, effectShadowOffset=(0, 0),
@@ -249,6 +249,28 @@ print('Opaque silhouette blur is monotonic and free of sparse-sampling steps.')
 # rather than only an opaque rectangle that hides incorrect spread/fill.
 
 class ShadowRegressions(unittest.TestCase):
+    def test_increasing_blur_does_not_shrink_exterior_shadow(self):
+        pixels = bytes([0, 0, 0, 255]) * 64 * 64
+        values = dict(effectShadowHole=(64, 64, 320, 320), effectShadowHoleRadius=12,
+                      effectShadowExp=8, effectShadowOffset=(0, 0),
+                      effectShadowRectOrigin=(0, 0), effectShadowRectSize=(384, 384),
+                      fillPadding=1, sampleBounds=(0, 0, 1, 1),
+                      pixelStep=(1/384, 1/384), textureOrigin=(0, 0))
+        for scale in [1, 1.25, 1.5, 2]:
+            size = round(384 * scale)
+            for spread in [-2, 0, 7]:
+                previous = 0
+                for blur in range(4, 51):
+                    with self.subTest(scale=scale, spread=spread, blur=blur):
+                        alpha = render_shadow(pixels, values, size=size, work_size=size,
+                                              spread=spread, blur_step=blur/4, rect_size=384)
+                        # Integrate the exterior straight-edge profile. Individual
+                        # pixels may lighten as blur grows, but its overall reach
+                        # must not jump backwards (especially around 24/25/26).
+                        mass = alpha[size//2, :round(64*scale)].sum() / (255 * scale)
+                        self.assertGreaterEqual(mass + 0.02, previous)  # RGBA8 rounding
+                        previous = mass
+
     def mask(self, pixels, spread=0, fill=False, scale=1):
         values = dict(effectShadowHole=(0, 0, 64, 64), effectShadowHoleRadius=0,
                       effectShadowExp=2, effectShadowOffset=(0, 0),

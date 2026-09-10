@@ -18,7 +18,7 @@ output = repo / "tests/artifacts/shadows"
 output.mkdir(parents=True, exist_ok=True)
 subprocess.run(["gjs", "-m", str(Path(__file__).with_name("native.js")), str(output)],
                check=True, timeout=30)
-# Reuse the production GLSL harness, including its downsampling and RGBA8 targets.
+# Reuse the production GLSL harness, including its pixel grid and RGBA8 targets.
 render = runpy.run_path(str(repo / "tests/unit/render.py"))["render_shadow"]
 pixels = bytes([0, 0, 0, 255]) * (64 * 64)
 
@@ -39,7 +39,7 @@ def shadow(blur, spread, y=0, width=256):
                   fillPadding=1, sampleBounds=(0, 0, 1, 1),
                   pixelStep=(1/size, 1/size), textureOrigin=(0, 0))
     return render(pixels, values, size=size,
-                  work_size=math.ceil(size / max(1, blur / 4)),
+                  work_size=size,
                   spread=spread, blur_step=blur/4, rect_size=size) / 255
 
 

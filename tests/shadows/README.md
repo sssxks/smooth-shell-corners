@@ -24,13 +24,14 @@ Normal-contrast native layers (x/y offsets are all zero):
 We measure alpha at the middle of all four straight edges, from 1.5 to 47.5
 logical pixels outside the window. This excludes the native 1px outline.
 Joint fitting over 256, 320 and 400px windows reduces sensitivity to the
-extension's downsample-grid alignment. The harness uses the same 80px padding,
-RGBA8 intermediate images, nine-tap separable blur, spread and bilinear
-reconstruction as the effect. We search integer blur 4–30 and spread −3–10,
+extension's former downsample-grid alignment. The harness now uses the same 80px padding,
+RGBA8 intermediate images, stable pixel grid, variable-width separable Gaussian
+blur and spread as the effect. We search integer blur 4–30 and spread −3–10,
 solving the least-squares opacity for each pair and rounding it to 0–255.
 Offsets remain zero to match the native symmetry.
 
-Measured at 100% strength / 1× rendering scale on this machine:
+Historical measurements with the former nine-tap downsampled blur, at 100%
+strength / 1× rendering scale on this machine (not recalibrated for the stable-grid blur):
 
 | State | Old RMSE (alpha × 255) | New RMSE | New opacity / blur / spread / x / y |
 | --- | ---: | ---: | --- |

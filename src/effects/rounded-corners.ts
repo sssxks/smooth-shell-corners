@@ -334,6 +334,7 @@ export const RoundedCornersEffect = GObject.registerClass(
             };
             this._shadowBlurUniforms = {
                 effectShadowBlurUvStep: blurPipeline.get_uniform_location('effectShadowBlurUvStep'),
+                effectShadowBlurPixels: blurPipeline.get_uniform_location('effectShadowBlurPixels'),
             };
             this._shadowUniforms = {
                 effectShadowOpacity: pipeline.get_uniform_location('effectShadowOpacity'),
@@ -355,14 +356,11 @@ export const RoundedCornersEffect = GObject.registerClass(
             const actorHeight = this.actor.get_height();
             const rectWidth = actorWidth + 2 * SHADOW_PADDING;
             const rectHeight = actorHeight + 2 * SHADOW_PADDING;
-            // Keep the 9-tap kernel no sparser than one intermediate texel.
-            // Wide shadows use a smaller alpha-only working image and are
-            // linearly reconstructed by the final paint pass.
-            const blurStep = this._shadowBlur > 0 ? this._shadowBlur / 4 : 0;
-            const downsample = Math.max(1, blurStep * scale);
-            const bufferScale = scale / downsample;
-            const width = Math.max(1, Math.ceil(rectWidth * bufferScale));
-            const height = Math.max(1, Math.ceil(rectHeight * bufferScale));
+            // Keep the silhouette and spread on a stable pixel grid as blur
+            // changes. Resizing a binary mask to blur / 4 made its edges jump.
+            const blur = this._shadowBlur;
+            const width = Math.max(1, Math.ceil(rectWidth * scale));
+            const height = Math.max(1, Math.ceil(rectHeight * scale));
 
             if (!this._shadowMaskFramebuffer ||
                 this._shadowMaskFramebuffer.get_width() !== width ||
@@ -428,15 +426,19 @@ export const RoundedCornersEffect = GObject.registerClass(
                 maskFramebuffer.draw_rectangle(spreadPipeline, -SHADOW_PADDING, -SHADOW_PADDING,
                     actorWidth + SHADOW_PADDING, actorHeight + SHADOW_PADDING);
             }
-            if (blurStep > 0) {
+            if (blur > 0) {
                 blurPipeline.set_layer_texture(0, maskFramebuffer.get_texture());
                 blurPipeline.set_uniform_float(blurUniforms.effectShadowBlurUvStep, 2, 1,
-                    [blurStep / rectWidth, 0]);
+                    [1 / width, 0]);
+                blurPipeline.set_uniform_float(blurUniforms.effectShadowBlurPixels, 1, 1,
+                    [blur * width / rectWidth]);
                 blurFramebuffer.draw_rectangle(blurPipeline, -SHADOW_PADDING, -SHADOW_PADDING,
                     actorWidth + SHADOW_PADDING, actorHeight + SHADOW_PADDING);
                 blurPipeline.set_layer_texture(0, blurFramebuffer.get_texture());
                 blurPipeline.set_uniform_float(blurUniforms.effectShadowBlurUvStep, 2, 1,
-                    [0, blurStep / rectHeight]);
+                    [0, 1 / height]);
+                blurPipeline.set_uniform_float(blurUniforms.effectShadowBlurPixels, 1, 1,
+                    [blur * height / rectHeight]);
                 maskFramebuffer.draw_rectangle(blurPipeline, -SHADOW_PADDING, -SHADOW_PADDING,
                     actorWidth + SHADOW_PADDING, actorHeight + SHADOW_PADDING);
             }
