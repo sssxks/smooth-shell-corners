@@ -45,6 +45,32 @@ const plain = value => JSON.parse(JSON.stringify(value));
 const near = (actual, expected) => actual.forEach((value, i) =>
     assert.ok(Math.abs(value - expected[i]) < 1e-12));
 
+for (const borderWidth of [-2, 2]) test(`border ${borderWidth} corner thickness follows the straight edge width`, () => {
+    for (const smoothing of [0, 0.3, 0.6, 1]) {
+        for (const scale of [1, 1.25, 1.5, 2]) {
+            for (const cornerRadius of [0, 12, 24]) {
+                const fx = new Effect();
+                fx.updateUniforms(scale, {...cfg, smoothing, cornerRadius, borderWidth}, frame);
+                const u = fx.values;
+                // The diagonal intersection of the shader's superellipse is
+                // (left + r - r / 2^(1/e), top + r - r / 2^(1/e)).
+                const diagonal = (b, r) => Math.SQRT2 *
+                    (b[0] + r * (1 - 2 ** (-1 / Math.max(2, u.exponent[0]))));
+                const thickness = Math.sign(borderWidth) *
+                    (diagonal(u.borderedAreaBounds, u.borderedAreaClipRadius[0]) -
+                    diagonal(u.bounds, u.clipRadius[0]));
+                const width = 2 * scale;
+                // Square corners meet at a miter; smoothed corners use the
+                // existing superellipse approximation to a parallel curve.
+                const expected = cornerRadius === 0 ? width * Math.SQRT2 : width;
+                assert.ok(Math.abs(thickness - expected) < expected * 0.1,
+                    `smoothing=${smoothing}, scale=${scale}, radius=${cornerRadius}: ` +
+                    `corner ${thickness.toFixed(3)}px vs edge ${width}px`);
+            }
+        }
+    }
+});
+
 test('fill restores frame bounds and samples clean pixel centres at each scale', () => {
     for (const scale of [1, 1.25, 2]) {
         const fx = new Effect();

@@ -477,8 +477,10 @@ export const RoundedCornersEffect = GObject.registerClass(
             const actorH = this.actor.get_height();
             const bb = [b[0] + bw, b[1] + bw, b[2] - bw, b[3] - bw];
 
-            let borderInnerR = outerR - Math.abs(bw);
-            if (borderInnerR < 0.001) borderInnerR = 0.0;
+            // Match the signed rectangle inset: outer borders expand the
+            // radius too, otherwise their corners become much thicker.
+            // Keep square corners when rounding is disabled.
+            let borderRadius = outerR > 0 ? Math.max(0, outerR - bw) : 0;
 
             let exponent = smoothing * 10 + 2;
             let radius   = outerR * 0.5 * exponent;
@@ -488,7 +490,7 @@ export const RoundedCornersEffect = GObject.registerClass(
                 radius    = maxR;
             }
             if (outerR > 0)
-                borderInnerR *= radius / outerR;
+                borderRadius *= radius / outerR;
 
             const shadowActor = this.actor;
             this._shadowEnabled = !!shadow && shadow.opacity > 0;
@@ -514,7 +516,7 @@ export const RoundedCornersEffect = GObject.registerClass(
             pipeline.set_uniform_float(u.borderWidth, 1, 1, [bw]);
             pipeline.set_uniform_float(u.borderColor, 4, 1, bc);
             pipeline.set_uniform_float(u.borderedAreaBounds, 4, 1, bb);
-            pipeline.set_uniform_float(u.borderedAreaClipRadius, 1, 1, [borderInnerR]);
+            pipeline.set_uniform_float(u.borderedAreaClipRadius, 1, 1, [borderRadius]);
             pipeline.set_uniform_float(u.exponent, 1, 1, [exponent]);
             this._updateTextureMapping(
                 Math.max(1, Math.ceil(actorW * paintScale) + 1),
