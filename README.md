@@ -6,10 +6,6 @@ Consistent squircle corners across GNOME windows, with crisp text at fractional 
 |:--:|:--:|
 | ![Square sample window at 150% scaling](docs/images/before.png) | ![The same sample window with subtle rounded corners](docs/images/after.png) |
 
-Actual GNOME Shell 50.4 captures at 150% scaling using a GTK4 sample window.
-Demo settings: radius 12, smoothing 0.6, custom shadows on. These are a subtle
-preset, not the extension defaults. [Capture details](docs/images/README.md).
-
 [Download](https://github.com/sssxks/smooth-shell-corners/releases) ·
 [Settings guide](docs/guide.md) ·
 [Report a problem](https://github.com/sssxks/smooth-shell-corners/issues/new/choose) ·
@@ -17,28 +13,23 @@ preset, not the extension defaults. [Capture details](docs/images/README.md).
 
 ## Why this extension?
 
-- Adjust corners from circles to squircles, with optional borders and shadows.
-- Preserve text sharpness at fractional scaling with pixel-aligned rendering.
-- Fill narrow clipped application borders with pixels from inside the window.
-- Replace native GTK4 corners, or keep toolkit styling and exclude individual apps.
+- Unified look for **every** app! squircles, optional borders and shadows.
+- Correct **fractional scaling**: preserve text sharpness with pixel-aligned rendering.
+- **Detail**-oriented: handles native corners, borders, insets with acceptible overhead.
+- **Customizable**: tune border radius, smoothness, border and shadow intensity!
 
 This is a fork of [Rounded Windows](https://github.com/Nathanaelrc/rounded-windows).
-Its focus is rendering quality: fractional-scale text, clipped edges, and consistent
-corners and shadows. It has separate settings; enable only one window-corner
-extension at a time. There is no published head-to-head comparison with other extensions.
 
 ## Compatibility and current limits
 
 Early preview. Locally tested on **Bazzite, GNOME Shell 50.4, Wayland**.
-The isolated compositor checks cover 100%, 125%, 150% and 200% scaling.
 Metadata also allows GNOME 45–49, but this fork's renderer has **not been verified**
 on those versions. Mixed-monitor setups and interactions with other window effects
 need testers. [Testing scope and known limits](docs/testing.md).
 
-Corners apply to top-level windows; some menus, tooltips and app-drawn surfaces
-remain unchanged. Filling borders can stretch edge content such as scrollbars.
-
-**Native GTK4 corner replacement is enabled by default.** It manages a marked CSS
+- Corners apply to top-level windows only.
+- Filling borders can stretch edge content such as scrollbars.
+- **Native GTK4 corner replacement is enabled by default.** It manages a marked CSS
 block in host and existing Flatpak GTK4 configuration files. Restart GTK4 apps
 after enabling or disabling it. You can turn it off in Applications settings.
 The override also affects GTK4 windows excluded from the extension's filters.
