@@ -8,7 +8,7 @@ uv run tests/performance/gpu/run.py --no-timers
 uv run tests/performance/gpu/run.py --checkout /path/to/worktree --modes shadows --no-timers
 ```
 
-Allow about a minute for all three modes. The runner builds the selected
+Allow about 90 seconds for all three modes. The runner builds the selected
 checkout and starts a private headless Shell, with separate configuration,
 session bus and extension settings. The desktop Shell is not modified.
 The Rust library is compiled locally by `rustc`; no installed native module,
@@ -25,9 +25,10 @@ The probe verifies effect state, monitor geometry and window size.
 
 Each mode (off, corners, shadows) contains one-second warmups and four-second
 measurements of static idle, moving one window, and damaging one window at
-roughly 60 Hz. Damage requests repaint of one actor, simulating an updating
+roughly 60 Hz, followed by damaging all four windows together. Damage requests repaint of one actor, simulating an updating
 application without needing a particular app/version. The other three windows
-stay unchanged. This is useful for reproducing the compositor cost of a live
+stay unchanged in the single-window cases. The final case exposes filtering
+cost when every source is dirty and the shadow cache cannot help. This is useful for reproducing the compositor cost of a live
 graph on an otherwise quiet desktop.
 
 `timer.rs` interposes EGL's function resolver, then wraps the actual GL draws,
@@ -60,7 +61,11 @@ use, but the expensive current renderer stayed near 24% with/without tracing.
 A frame count here means a Clutter before-paint callback; some callbacks issue
 no GL commands. `frames_with_gpu_commands` distinguishes those cases. Sum of
 command timings excludes unwrapped work, query overhead and gaps between GL
-commands; it is not presentation latency. Other desktop processes share the
+commands; it is not presentation latency. Reports retain the original callback-normalized
+`gpu_ms_per_frame`, and also provide `gpu_ms_per_rendered_frame` and its
+nearest-rank p95 using only callbacks with timed commands. These are null
+when there are no timed frames. The command-line summary uses rendered frames.
+Other desktop processes share the
 physical GPU, so use broad regression thresholds and verify boundary commits.
 The tracer targets the draw entry points used by the installed Mutter 50.4,
 not arbitrary OpenGL applications.

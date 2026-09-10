@@ -47,7 +47,14 @@ class Accounting(unittest.TestCase):
             self.assertAlmostEqual(result['gpu_ms_per_frame'], 10/3)
             self.assertAlmostEqual(result['gpu_ms_per_second'], 10/3)
             self.assertEqual(result['frames_with_gpu_commands'], 2)
+            self.assertEqual(result['gpu_ms_per_rendered_frame'], 5)
+            self.assertEqual(result['gpu_ms_per_rendered_frame_p95'], 6)
             self.assertEqual(result['passes']['blur-x']['gpu_ms'], 8)
+            trace.write_text('')
+            empty = profile.analyze(trace, records, samples)[0]
+            self.assertEqual(empty['frames_with_gpu_commands'], 0)
+            self.assertIsNone(empty['gpu_ms_per_rendered_frame'])
+            self.assertIsNone(empty['gpu_ms_per_rendered_frame_p95'])
             trace.unlink()
             self.assertIsNone(profile.analyze(trace, records, samples)[0]['gpu_ms_per_frame'])
 

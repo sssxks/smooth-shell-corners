@@ -9,6 +9,7 @@ from collections import defaultdict
 import csv
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import select
@@ -69,8 +70,11 @@ def analyze(trace, records, samples):
         passes = {label: {'calls': len(values), 'gpu_ms': sum(v[0] for v in values)/1e6,
                           'mean_us': sum(v[0] for v in values)/len(values)/1e3,
                           'max_target': max((v[1], v[2]) for v in values)} for label, values in groups.items()}
+        active_ms = sorted(ns/1e6 for ns in frame_ns.values())
         results.append({**record, 'frames': len(frames), 'gfx_busy_percent': busy,
                         'gpu_ms_per_frame': sum(r[2] for r in selected)/1e6/max(1, len(frames)) if trace.exists() else None,
+                        'gpu_ms_per_rendered_frame': sum(active_ms)/len(active_ms) if active_ms else None,
+                        'gpu_ms_per_rendered_frame_p95': active_ms[math.ceil(.95*len(active_ms))-1] if active_ms else None,
                         'frames_with_gpu_commands': len(frame_ns) if trace.exists() else None,
                         'gpu_ms_per_second': sum(r[2] for r in selected)/(end-start)*1000 if trace.exists() else None,
                         'passes': passes})
@@ -155,7 +159,7 @@ def main():
             for mode in args.modes:
                 print(f'Measuring {mode}', flush=True)
                 evaluate(f'global.sscGpu.start({json.dumps(mode)})')
-                deadline = time.monotonic()+18
+                deadline = time.monotonic()+23
                 while time.monotonic() < deadline:
                     samples.append(engines(pid))
                     time.sleep(.25)
@@ -164,7 +168,9 @@ def main():
                 records.extend(result['records'])
                 metadata.setdefault('settings', {})[mode] = result['settings']
                 for r in analyze(output/'draws.csv', result['records'], samples):
-                    timing = f"{r['gpu_ms_per_frame']:.3f} ms/frame" if r["gpu_ms_per_frame"] is not None else "timers disabled"
+                    timing = (f"{r['gpu_ms_per_rendered_frame']:.3f} ms/rendered frame"
+                              if r["gpu_ms_per_rendered_frame"] is not None
+                              else "no timed frames" if not args.no_timers else "timers disabled")
                     print(f"  {r['workload']:6}: gfx {r['gfx_busy_percent']:.1f}%, "
                           f"{r['frames']} paint callbacks, GPU commands {timing}", flush=True)
             log = (root/'cache/shell.log').read_text()

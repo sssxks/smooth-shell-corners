@@ -67,10 +67,11 @@ export default class Probe {
             if (rect.width !== 1000 || rect.height !== 650) throw new Error('Unexpected window size');
         }
         const records = [];
-        for (const workload of ['idle', 'move', 'damage']) {
+        for (const workload of ['idle', 'move', 'damage', 'damage-all']) {
             let timer = 0, tick = 0;
             if (workload !== 'idle') timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 16, () => {
                 if (workload === 'move') actors[0].metaWindow.move_frame(false, 30 + (tick++ % 100), 40);
+                else if (workload === 'damage-all') actors.forEach(a => a.queue_redraw());
                 else actors[0].queue_redraw();
                 return GLib.SOURCE_CONTINUE;
             });

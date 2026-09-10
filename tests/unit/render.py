@@ -299,7 +299,7 @@ class ShadowRegressions(unittest.TestCase):
         source.repeat_x = source.repeat_y = False
         target = ctx.simple_framebuffer((size, size), components=4)
         try:
-            for radius in [0.05, 0.5, 1, 2, 3.5, 24, 25, 26, 120, 240]:
+            for radius in [0.05, 0.5, 1, 2, 3.5, 24, 25, 26, 120, 240, 480, 960]:
                 for axis, step in [(0, (0, 1/size)), (1, (1/size, 0))]:
                     with self.subTest(radius=radius, axis=axis):
                         target.use()
