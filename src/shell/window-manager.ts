@@ -115,7 +115,7 @@ function refreshRoundedCorners(actor: Meta.WindowActor) {
     const data = _actorMap.get(actor);
     if (!data) return;
     const cfg = readConfig(currentSettings());
-    if (shouldSkipWindow(win, cfg, _nativeRadiusRemoved)) {
+    if (shouldSkipWindow(win, cfg, _nativeRadiusRemoved, refreshAll)) {
         onRemoveEffect(actor);
         return;
     }
@@ -287,16 +287,23 @@ export default class SmoothShellCornersExtension extends Extension {
     #startupConnection = 0;
     #nativeRadiusConnection = 0;
 
-    #syncNativeRadius(enabled: boolean) {
+    #nativeRadiusRevision = 0;
+
+    async #syncNativeRadius(enabled: boolean) {
+        const revision = ++this.#nativeRadiusRevision;
+        const settings = _settings;
         try {
-            setNativeRadiusRemoved(enabled);
+            await setNativeRadiusRemoved(enabled);
+            if (revision !== this.#nativeRadiusRevision || _settings !== settings || !settings) return;
             _nativeRadiusRemoved = enabled;
+            refreshAll();
         } catch (error) {
             console.error(`[SmoothShellCorners] ${String(error)}`);
+            if (revision !== this.#nativeRadiusRevision || _settings !== settings) return;
             Main.notifyError('Smooth Shell Corners',
                 `Could not ${enabled ? 'remove' : 'restore'} native GTK4 corners. ${String(error)}`);
             // If enabling only succeeded for some files, roll those back.
-            if (enabled) this.#syncNativeRadius(false);
+            if (enabled) await this.#syncNativeRadius(false);
         }
     }
 

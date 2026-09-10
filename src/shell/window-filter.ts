@@ -1,13 +1,16 @@
-import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 
 import type {ExtensionConfig} from '../settings/config.js';
 
 type AppType = 'Other' | 'LibAdwaita' | 'LibHandy';
+const pendingReads = new Map<number, Gio.Cancellable>();
 const appTypeCache = new Map<number, AppType>();
 
 export function clearWindowFilterCache(): void {
+    for (const cancellable of pendingReads.values()) cancellable.cancel();
+    pendingReads.clear();
     appTypeCache.clear();
 }
 const ROUNDABLE_WINDOW_TYPES = [
@@ -64,32 +67,38 @@ export function isListedWindow(identifiers: string[], list: string[]): boolean {
     });
 }
 
-function getAppType(win: Meta.Window): AppType {
+function getAppType(win: Meta.Window, onReady: () => void): AppType | undefined {
     const pid = win.get_pid();
-    if (appTypeCache.size > 200)
-        appTypeCache.clear();
     const cached = appTypeCache.get(pid);
     if (cached) return cached;
+    if (pendingReads.has(pid)) return undefined;
 
-    let type: AppType = 'Other';
-    try {
-        const decoder = new TextDecoder();
-        const [, bytes] = GLib.file_get_contents(`/proc/${pid}/maps`);
-        const maps = decoder.decode(bytes);
-        if (maps.includes('libadwaita-1.so'))
-            type = 'LibAdwaita';
-        else if (maps.includes('libhandy-1.so'))
-            type = 'LibHandy';
-    } catch (_) {}
-
-    appTypeCache.set(pid, type);
-    return type;
+    const cancellable = new Gio.Cancellable();
+    pendingReads.set(pid, cancellable);
+    const file = Gio.File.new_for_path(`/proc/${pid}/maps`);
+    file.load_contents_async(cancellable, (_file, result) => {
+        let type: AppType = 'Other';
+        try {
+            const [, bytes] = file.load_contents_finish(result);
+            const maps = new TextDecoder().decode(bytes);
+            if (maps.includes('libadwaita-1.so')) type = 'LibAdwaita';
+            else if (maps.includes('libhandy-1.so')) type = 'LibHandy';
+        } catch (_) {}
+        // A cleared cache belongs to a new settings state or enable cycle.
+        if (cancellable.is_cancelled()) return;
+        pendingReads.delete(pid);
+        if (appTypeCache.size > 200) appTypeCache.clear();
+        appTypeCache.set(pid, type);
+        onReady();
+    });
+    return undefined;
 }
 
 export function shouldSkip(
     win: Meta.Window,
     config: ExtensionConfig,
     nativeRadiusRemoved: boolean,
+    onReady: () => void = () => {},
 ): boolean {
     const identifiers = getWindowIdentifiers(win);
     if (identifiers.some(id => ['com.rastersoft.ding', 'ding'].includes(normalizeAppId(id))))
@@ -113,7 +122,9 @@ export function shouldSkip(
     const skipAdwaita = !nativeRadiusRemoved && config.skipLibadwaitaApp;
     if (isListed || (!skipAdwaita && !config.skipLibhandyApp))
         return false;
-    const appType = getAppType(win);
+    const appType = getAppType(win, onReady);
+    // Preserve native appearance until toolkit detection completes.
+    if (appType === undefined) return true;
     return (skipAdwaita && appType === 'LibAdwaita') ||
         (config.skipLibhandyApp && appType === 'LibHandy');
 }

@@ -1,14 +1,14 @@
-import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 import {readConfig} from '../../dist/settings/config.js';
 import {clearWindowFilterCache, getWindowIdentifiers, shouldSkip} from '../../dist/shell/window-filter.js';
 
 export function checkWindowFilter(win, settings) {
     const config = readConfig(settings);
-    const read = GLib.file_get_contents;
+    const read = Gio.File.prototype.load_contents_async;
     let reads = 0;
-    GLib.file_get_contents = path => {
-        if (path.startsWith('/proc/')) reads++;
-        return read(path);
+    Gio.File.prototype.load_contents_async = function (...args) {
+        if (this.get_path().startsWith('/proc/')) reads++;
+        return read.apply(this, args);
     };
     function check(condition, message) {
         if (!condition) throw new Error(message);
@@ -29,7 +29,7 @@ export function checkWindowFilter(win, settings) {
         check(reads === 1, 'Toolkit detection is cached');
         return true;
     } finally {
-        GLib.file_get_contents = read;
+        Gio.File.prototype.load_contents_async = read;
         clearWindowFilterCache();
     }
 }

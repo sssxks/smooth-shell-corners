@@ -17,7 +17,7 @@ install: build
 
 pack: build
     rm -f smooth-shell-corners@xks.shell-extension.zip
-    cd dist && zip -9r ../smooth-shell-corners@xks.shell-extension.zip .
+    cd dist && zip -9r ../smooth-shell-corners@xks.shell-extension.zip . -x schemas/gschemas.compiled restore-native-radius.js 'tools/*'
 
 # Bazzite / GNOME 50; builds the checkout and benchmarks a private Shell.
 benchmark: benchmark-check

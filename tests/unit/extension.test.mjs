@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
+import {setImmediate} from 'node:timers';
 import {test} from 'node:test';
 
 const source = readFileSync(new URL('../../dist/shell/window-manager.js', import.meta.url), 'utf8')
     .replace(/^import .*;$/gm, '').replace('export default class', 'class');
 
-function setup(failEnable = false) {
+function setup(failEnable = false, write = () => {}) {
     const values = {'remove-native-radius': true, 'skip-libadwaita-app': true};
     const callbacks = new Map();
     let nextId = 0;
@@ -26,6 +27,7 @@ function setup(failEnable = false) {
         // Isolate the setting/lifecycle wiring from compositor actor plumbing.
         enableEffect = () => {};
         disableEffect = () => {};
+        refreshAll = () => {};
         getAppType = () => 'LibAdwaita';
         shouldSkipWindow = () => _settings.get_boolean('skip-libadwaita-app') &&
             !_nativeRadiusRemoved;
@@ -38,6 +40,7 @@ function setup(failEnable = false) {
         setNativeRadiusRemoved: enabled => {
             calls.push(enabled);
             if (enabled && failEnable) throw new Error('Test write failure');
+            return write(enabled);
         },
     });
     return {...result, calls, notices, callbacks, change(enabled) {
@@ -47,26 +50,51 @@ function setup(failEnable = false) {
     }};
 }
 
-test('native removal overrides skip only while active and cleans up on disable', () => {
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('native removal overrides skip only while active and cleans up on disable', async () => {
     const state = setup();
     state.instance.enable();
+    await settle();
     assert.equal(state.skip(), false);
     state.change(false);
+    await settle();
     assert.equal(state.skip(), true);
     state.change(true);
+    await settle();
     assert.equal(state.skip(), false);
     state.instance.disable();
     assert.deepEqual(state.calls, [true, false, true, false]);
     assert.equal(state.callbacks.size, 0);
 });
 
-test('failed native removal reports an error and rolls back partial writes', () => {
+test('failed native removal reports an error and rolls back partial writes', async () => {
     const state = setup(true);
     state.instance.enable();
+    await settle();
     assert.deepEqual(state.calls, [true, false]);
     assert.equal(state.notices.length, 1);
     assert.equal(state.skip(), true);
     state.instance.disable();
+});
+
+test('late CSS completion after disable cannot affect a new enable cycle', async () => {
+    const completions = [];
+    const state = setup(false, () => new Promise(resolve => completions.push(resolve)));
+    state.instance.enable();
+    state.instance.disable();
+    state.instance.enable();
+    assert.equal(state.skip(), true);
+    completions[0]();
+    completions[1]();
+    await settle();
+    assert.equal(state.skip(), true);
+    completions[2]();
+    await settle();
+    assert.equal(state.skip(), false);
+    state.instance.disable();
+    completions[3]();
+    await settle();
 });
 
 function setupWindowLifecycle(ready = true) {

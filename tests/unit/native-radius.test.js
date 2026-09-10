@@ -8,9 +8,9 @@ function assert(condition, message) {
     if (!condition) throw new Error(message);
 }
 
-function throws(fn, message) {
+async function throws(fn, message) {
     let failed = false;
-    try { fn(); } catch (_) { failed = true; }
+    try { await fn(); } catch (_) { failed = true; }
     assert(failed, message);
 }
 
@@ -35,13 +35,13 @@ try {
     GLib.mkdir_with_parents(`${flatpaks}/org.example.App/config`, 0o700);
     GLib.file_set_contents(`${flatpaks}/not-an-app`, '');
     Gio.File.new_for_path(`${flatpaks}/linked-app`).make_symbolic_link(`${flatpaks}/org.example.App`, null);
-    const paths = nativeCssFiles(config, flatpaks);
+    const paths = await nativeCssFiles(config, flatpaks);
     assert(paths.length === 2, 'Discover host and real Flatpak directories only');
-    assert(nativeCssFiles(config, `${root}/missing`).length === 1, 'Missing Flatpak root is supported');
+    assert((await nativeCssFiles(config, `${root}/missing`)).length === 1, 'Missing Flatpak root is supported');
 
     // Do not create config files just because the extension is enabled with
     // removal off, or during uninstall on a machine that never used removal.
-    setNativeRadiusRemoved(false, paths);
+    await setNativeRadiusRemoved(false, paths);
     assert(!GLib.file_test(config, GLib.FileTest.EXISTS), 'Cleanup must not create config directories');
 
     const originals = ['', '/* no trailing newline */', '/* user CSS */\r\n', '\uFEFF/* UTF-8 BOM */'];
@@ -53,32 +53,49 @@ try {
             'Cleanup preserves new user edits');
     }
 
-    setNativeRadiusRemoved(true, paths);
-    for (const path of paths) assert(read(path).includes(NATIVE_RADIUS_CSS), 'CSS reaches host and Flatpak');
+    await setNativeRadiusRemoved(true, paths);
+    for (const path of paths) {
+        assert(read(path).includes(NATIVE_RADIUS_CSS), 'CSS reaches host and Flatpak');
+        const directory = Gio.File.new_for_path(path).get_parent();
+        const mode = directory.query_info('unix::mode', Gio.FileQueryInfoFlags.NONE, null)
+            .get_attribute_uint32('unix::mode') & 0o777;
+        assert(mode === 0o700, 'New GTK configuration directories remain private');
+    }
     const enabled = read(paths[0]);
-    setNativeRadiusRemoved(true, paths);
+    await setNativeRadiusRemoved(true, paths);
     assert(read(paths[0]) === enabled, 'Repeated file writes do not duplicate the override');
     GLib.file_set_contents(paths[0], '/* before */' + enabled + '/* after */');
-    setNativeRadiusRemoved(false, paths);
+    await setNativeRadiusRemoved(false, paths);
     assert(read(paths[0]) === '/* before *//* after */', 'User edits survive real file cleanup');
     assert(read(paths[1]) === '', 'New Flatpak CSS becomes harmless empty file');
 
     GLib.file_set_contents(paths[0], originals[3]);
-    setNativeRadiusRemoved(true, paths);
-    setNativeRadiusRemoved(false, paths);
+    await setNativeRadiusRemoved(true, paths);
+    await setNativeRadiusRemoved(false, paths);
     assert(Array.from(GLib.file_get_contents(paths[0])[1]).join() ===
         Array.from(new TextEncoder().encode(originals[3])).join(), 'UTF-8 BOM is preserved on disk');
 
+    await Promise.all([
+        setNativeRadiusRemoved(true, paths),
+        setNativeRadiusRemoved(false, paths),
+        setNativeRadiusRemoved(true, paths),
+        setNativeRadiusRemoved(false, paths),
+    ]);
+    assert(Array.from(GLib.file_get_contents(paths[0])[1]).join() ===
+        Array.from(new TextEncoder().encode(originals[3])).join(),
+    'Rapid toggles finish with cleanup and preserve user CSS');
+    assert(read(paths[1]) === '', 'Rapid toggles leave no Flatpak override');
+
     const malformed = enabled.replace('END Smooth', 'EDITED Smooth');
     GLib.file_set_contents(paths[0], malformed);
-    setNativeRadiusRemoved(true, [paths[1]]);
-    throws(() => setNativeRadiusRemoved(false, paths), 'Malformed markers report an error');
+    await setNativeRadiusRemoved(true, [paths[1]]);
+    await throws(() => setNativeRadiusRemoved(false, paths), 'Malformed markers report an error');
     assert(read(paths[0]) === malformed, 'Malformed file is not truncated');
     assert(read(paths[1]) === '', 'One failure does not prevent cleanup of other files');
-    throws(() => updateCss(enabled + enabled, false), 'Duplicate markers are rejected');
+    await throws(() => updateCss(enabled + enabled, false), 'Duplicate markers are rejected');
 
     GLib.file_set_contents(paths[0], new Uint8Array([0xff]));
-    throws(() => setNativeRadiusRemoved(true, paths), 'Invalid UTF-8 is not silently rewritten');
+    await throws(() => setNativeRadiusRemoved(true, paths), 'Invalid UTF-8 is not silently rewritten');
     assert(GLib.file_get_contents(paths[0])[1][0] === 0xff, 'Invalid bytes preserved');
 
     const provider = new Gtk.CssProvider();

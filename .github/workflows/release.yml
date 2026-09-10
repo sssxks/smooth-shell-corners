@@ -35,7 +35,7 @@ jobs:
       - name: Package extension
         run: |
           cd dist
-          zip -9r ../smooth-shell-corners@xks.shell-extension.zip .
+          zip -9r ../smooth-shell-corners@xks.shell-extension.zip . -x schemas/gschemas.compiled restore-native-radius.js 'tools/*'
           cd ..
           sha256sum smooth-shell-corners@xks.shell-extension.zip > SHA256SUMS
       - uses: softprops/action-gh-release@v2
