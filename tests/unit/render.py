@@ -35,7 +35,6 @@ program = ctx.program(
     out vec4 cogl_color_out;
     uniform sampler2D cogl_sampler;
     uniform sampler2D cogl_sampler1;
-    uniform float actorOpacity;
     """ + snippet("BODY_DECLARATIONS") + snippet("FILL_DECLARATIONS") + snippet("ROUNDED_DECLARATIONS") + """
     void main() {
         vec4 cogl_tex_coord = vec4(uv, 0, 1);
@@ -45,7 +44,7 @@ program = ctx.program(
         {
     """ + snippet("FILL_CODE") + """
         }
-        cogl_color_out = cogl_texel * actorOpacity;
+        cogl_color_out = cogl_texel;
     """ + snippet("ROUNDED_CODE") + "}",
 )
 w, h = 32, 24
@@ -64,12 +63,12 @@ for key, value in dict(bounds=(0, 0, w, h), clipRadius=0, exponent=2,
                        borderedAreaBounds=(0, 0, w, h), borderedAreaClipRadius=0,
                        pixelStep=(1/w, 1/h), textureOrigin=(0, 0), fillPadding=1,
                        sampleBounds=(2.5/w, 2.5/h, (w-2.5)/w, (h-2.5)/h),
-                       actorOpacity=1).items():
+                       windowOpacity=1).items():
     program[key].value = value
 
 for enabled, opacity in [(1, 1), (1, 0.5), (0, 1)]:
     program['fillPadding'].value = enabled
-    program['actorOpacity'].value = opacity
+    program['windowOpacity'].value = opacity
     vao.render(vertices=3)
     result = fbo.read(components=4)
     for y in range(h):
@@ -87,6 +86,26 @@ result = fbo.read(components=4)
 assert result[3] == 0, 'Rounded corner should stay transparent'
 assert result[((h//2)*w)*4+3] == 255, 'Straight edge should reach frame'
 print('Shader compiled; edge fill, unchanged interior, disabled mode, opacity and corners passed.')
+
+# Compare every RGBA channel to the full-opacity image, for both border signs
+# and for bypassed body detection. This catches opaque borders during fades.
+for border in [-2, 2]:
+    for body_enabled in [0, 2]:
+        program['bodyEnabled'].value = body_enabled
+        program['borderWidth'].value = border
+        program['borderColor'].value = (1, 0.25, 0.5, 0.75)
+        program['bounds'].value = (3, 3, w-3, h-3)
+        program['borderedAreaBounds'].value = (3+border, 3+border, w-3-border, h-3-border)
+        program['borderedAreaClipRadius'].value = 6-border
+        program['windowOpacity'].value = 1
+        vao.render(vertices=3)
+        full = np.frombuffer(fbo.read(components=4), dtype=np.uint8).astype(float)
+        for opacity in [0, 0.25, 0.5, 1]:
+            program['windowOpacity'].value = opacity
+            vao.render(vertices=3)
+            faded = np.frombuffer(fbo.read(components=4), dtype=np.uint8).astype(float)
+            assert np.abs(faded-full*opacity).max() <= 1, (border, body_enabled, opacity)
+print('Inner/outer borders and rejected bodies fade with window opacity.')
 
 # Render the same hard-mask, horizontal-blur and vertical-blur passes used by
 # the effect. A wide opaque edge must produce a monotonic gradient rather than

@@ -7,7 +7,8 @@ import Meta from 'gi://Meta';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {RoundedCornersEffect, clearShadowCache} from '../effects/rounded-corners.js';
+import {RoundedCornersEffect} from '../effects/rounded-corners.js';
+import {clearShadowCache} from '../effects/shadow-baker.js';
 import { setNativeRadiusRemoved } from '../native-radius.js';
 import {readConfig} from '../settings/config.js';
 import {clearWindowFilterCache, shouldSkip as shouldSkipWindow} from './window-filter.js';
@@ -129,8 +130,10 @@ function refreshRoundedCorners(actor: Meta.WindowActor) {
 
     const scale = scaleFactor(win);
     const shadow = actor.metaWindow?.appears_focused ? cfg.focusedShadow : cfg.unfocusedShadow;
+    const suppressShadow = (win.maximizedHorizontally || win.maximizedVertically || win.fullscreen) &&
+        !cfg.keepShadowMaximized;
     fx.updateUniforms(scale, cfg, computeWindowBounds(actor, scale, cfg.fillPadding),
-        global.display.get_monitor_scale(win.get_monitor()), cfg.customShadow ? shadow : undefined, true);
+        global.display.get_monitor_scale(win.get_monitor()), cfg.customShadow && !suppressShadow ? shadow : undefined, true);
 }
 
 /** Refresh tracked windows without replacing their lifecycle connections. */

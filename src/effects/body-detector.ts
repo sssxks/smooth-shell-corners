@@ -57,9 +57,15 @@ export class BodyDetector {
         }
     }
 
-    private schedule(): void {
+    // Damage can change the body long after startup. Coalesce it without
+    // resetting the deadline, so continuous animation cannot starve detection.
+    contentChanged(): void {
+        if (!this.pending && !this.timer) this.schedule(1000);
+    }
+
+    private schedule(delay = 180): void {
         if (this.timer) GLib.source_remove(this.timer);
-        this.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 180, () => {
+        this.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
             this.timer = 0;
             this.pending = true;
             this.repaint();

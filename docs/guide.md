@@ -78,7 +78,8 @@ and custom shadows pass through without changing the app's appearance.
 
 Detection is a bounded sampling heuristic, not a complete silhouette scan. It
 searches at most 64 logical pixels inward and checks a sparse interior grid;
-tiny holes or later shape changes without resizing may escape detection.
+tiny holes may escape detection. Later content changes are checked within roughly
+one second while the window is painted.
 The **Exception list** remains available as an explicit override. To preserve
 an app's native GTK4 styling too, turn off **Replace native GTK4 corners** and
 restart it; that CSS override applies globally, including to skipped apps.
@@ -218,8 +219,8 @@ Body detection uses a 4×1 floating-point probe texture and a 1×1 result textur
 containing four insets. The painting shaders consume that result directly;
 production code never reads pixels back to the CPU. Up to three checks during
 startup accommodate initial app painting. Resizing reuses the previous insets
-and schedules one check after geometry settles for 180 ms. Ordinary content
-damage does not trigger detection. A GPU-rejected normal window still retains
+and schedules one check after geometry settles for 180 ms. Content damage
+schedules a check at most once per second; idle windows schedule no checks. A GPU-rejected normal window still retains
 its content framebuffer; utility windows bypass allocation altogether. If
 floating-point targets are unavailable, the effect preserves the app visually.
 
@@ -229,8 +230,8 @@ style changes; application damage and ordinary resizing reuse the tile. Each
 axis too small to separate opposite corners is rendered at its actual size.
 With automatic body detection, windows within 128 logical pixels of that limit
 use a private full-size shadow tile so GPU insets cannot make stretched corners
-overlap. This path rebakes on resize; sufficiently large windows keep sharing
-tiles. Private tiles are released with their window or on GPU-memory purge.
+overlap. This path rebakes on resize or a new body-detection result; sufficiently large
+windows keep sharing tiles. Private tiles are released with their window or on GPU-memory purge.
 Fractional edge phases can select different tiles. Overview clones sample the
 monitor-density tile. The final shader clears the unshifted window interior so
 shadow offsets do not darken translucent content.

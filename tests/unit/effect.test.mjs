@@ -5,9 +5,12 @@ import {test} from 'node:test';
 import {shadowGeometry} from '../../dist/effects/shadow-geometry.js';
 
 // Run the real uniform setup without requiring a running GNOME Shell.
-const source = readFileSync(new URL('../../dist/effects/rounded-corners.js', import.meta.url), 'utf8')
-    .replace(/^import \{[\s\S]*?\} from '\.\/shaders\.js';$/m, '')
-    .replace(/^import .*;$/gm, '').replaceAll('export const ', 'const ').replaceAll('export function ', 'function ');
+const source = ['texture-extent', 'shadow-baker', 'rounded-corners'].map(name =>
+    readFileSync(new URL(`../../dist/effects/${name}.js`, import.meta.url), 'utf8')
+        .replace(/^import \{[\s\S]*?\} from '\.\/shaders\.js';$/m, '')
+        .replace(/^import .*;$/gm, '').replaceAll('export const ', 'const ')
+        .replaceAll('export function ', 'function ').replaceAll('export let ', 'let ')
+).join('\n');
 class EffectBase {
     actor = {
         get_width: () => 100, get_height: () => 80,
@@ -35,7 +38,7 @@ const FILL_CODE = '';
 const ROUNDED_DECLARATIONS = '';
 const ROUNDED_CODE = '';
 const Effect = vm.runInNewContext(`${source}\nRoundedCornersEffect`, {
-    GObject: {registerClass: (_meta, cls) => cls}, Shell: {GLSLEffect: EffectBase},
+    GObject: {registerClass: (_meta, cls) => cls},
     Clutter: {Effect: EffectBase}, Cogl, Graphene: {},
     shadowGeometry, BODY_DECLARATIONS, FILL_DECLARATIONS, FILL_CODE, ROUNDED_DECLARATIONS, ROUNDED_CODE,
 });
@@ -170,6 +173,7 @@ function shadowEffect(width = 600, height = 400) {
         get_transformed_position: () => [0, 0], is_in_clone_paint: () => false,
         get_paint_opacity: () => 255,
     });
+    fx._u = {windowOpacity: 'windowOpacity'};
     fx._pipeline = {get_uniform_location: name => name, set_layer_texture() {}, set_layer_null_texture() {}, set_color() {}, set_uniform_float() {}};
     fx._ensureShadowPipeline = () => {
         if (fx._shadowPipeline) return;

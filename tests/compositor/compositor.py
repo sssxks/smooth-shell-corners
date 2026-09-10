@@ -52,7 +52,8 @@ import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {{checkWindowFilter}} from '{repo.as_uri()}/tests/compositor/window-filter.js';
 import Extension from '{repo.as_uri()}/dist/extension.js';
-import {{RoundedCornersEffect, clearShadowCache}} from '{repo.as_uri()}/dist/effects/rounded-corners.js';
+import {{RoundedCornersEffect}} from '{repo.as_uri()}/dist/effects/rounded-corners.js';
+import {{clearShadowCache}} from '{repo.as_uri()}/dist/effects/shadow-baker.js';
 import {{shadowFixture}} from '{repo.as_uri()}/tests/compositor/shadow-fixture.js';
 const Pass = GObject.registerClass(class SSCProbePass extends Shell.GLSLEffect {{
     vfunc_build_pipeline() {{ this.add_glsl_snippet(Cogl.SnippetHook.FRAGMENT, '', '', false); }}
@@ -239,6 +240,27 @@ export default class Probe {{
             compare(f"fixed-{scale}-{position}-{width}", baseline, capture("fixed"),
                     scale, position, position, width, height)
 
+        # Check the entire faded composition against opaque output over white.
+        # Cogl must apply opacity once, after adding inner or outer borders.
+        for scale in [1, 1.5]:
+            control('scale', scale)
+            for border in [-2, 2]:
+                evaluate(f"""global.ssc.makeShadow(true, 12, 3, 0, 0, {scale});
+                    global.ssc.fixtureEffect.updateUniforms(1,
+                        {{padding:{{left:0,top:0,right:0,bottom:0}},cornerRadius:12,smoothing:0.6,
+                          borderWidth:{border},borderColor:[1,0.25,0.5,0.75],fillPadding:true}},
+                        {{x1:4,y1:4,x2:296,y2:236}}, {scale}); true;""")
+                full = capture('border-opaque')
+                for opacity in [64, 128]:
+                    evaluate(f'global.ssc.shadowFixture[0].opacity = {opacity}; true;')
+                    faded = capture('border-faded')
+                    crop = (slice(round(170*scale),round(470*scale)),
+                            slice(round(170*scale),round(530*scale)))
+                    expected = 255 + (full[crop]-255)*(opacity/255)
+                    assert abs(faded[crop]-expected).max() <= 2, ('Border fade', scale, border, opacity)
+        evaluate('global.ssc.shadowFixture.forEach(a => a.destroy()); global.ssc.shadowFixture = null; true;')
+        print('Inner/outer borders and content fade together in Cogl.', flush=True)
+
         # Reused capacity must render like a fresh effect after growing,
         # shrinking and resizing within a bucket, including fractional scales.
         for scale in [1, 1.25, 1.5, 2]:
@@ -409,23 +431,27 @@ export default class Probe {{
                 global.ssc.bodyActor.metaWindow.set_type(global.ssc.Meta.WindowType.DIALOG);
                 global.ssc.bodyActor.metaWindow.move_resize_frame(false,101,101,{width},{height}); true;""")
             eventually(f"global.ssc.bodyActor.width === {width} && global.ssc.bodyActor.height === {height} && global.ssc.bodyActor.get_effect('ssc-rounded-corners')?._bodyDetector?.revision > 0 && global.ssc.bodyActor.get_effect('ssc-rounded-corners')._bodyDetector.timer === 0")
-            automatic = capture('body-auto')
+            capture('body-auto')
             evaluate("global.ssc.bodyFx=global.ssc.bodyActor.get_effect('ssc-rounded-corners'); global.ssc.bodyRevision=global.ssc.bodyFx._bodyDetector.revision; global.ssc.bodyActor.queue_redraw(); true;")
-            capture('body-damage')
-            assert evaluate('global.ssc.bodyFx._bodyDetector.revision === global.ssc.bodyRevision'), 'Content damage rescanned body'
+            inset = 32 if scale == 1 and width == 640 else 16
+            if inset == 32:
+                control('body-inset')  # Real app content changes after startup, without resizing.
+            eventually('global.ssc.bodyFx._bodyDetector.revision > global.ssc.bodyRevision')
+            automatic = capture('body-damage')
+            assert evaluate(f'global.ssc.bodyActor.width === {width} && global.ssc.bodyActor.height === {height}')
             evaluate(f"""(() => {{
                 const a=global.ssc.bodyActor; a.remove_effect_by_name('ssc-rounded-corners');
                 const fx=new global.ssc.RoundedCornersEffect(); a.add_effect_with_name('ssc-rounded-corners',fx);
                 fx.updateUniforms(1,{{padding:{{left:2,top:2,right:2,bottom:2}},cornerRadius:{radius},
                     smoothing:0.6,borderWidth:0,borderColor:[1,1,1,1],fillPadding:true}},
-                    {{x1:16,y1:16,x2:a.width-16,y2:a.height-16}},{scale},
+                    {{x1:{inset},y1:{inset},x2:a.width-{inset},y2:a.height-{inset}}},{scale},
                     {{opacity:255,blur:24,spread:7,xOffset:0,yOffset:0}});
                 return true;
             }})()""")
             reference = capture('body-manual-reference')
             crop = (slice(round(60*scale),round(580*scale)), slice(round(60*scale),round(800*scale)))
             delta = abs(automatic[crop]-reference[crop])
-            assert delta.max() <= 1, ('Detected body differs from known 16px inset',scale,width,height,radius,delta.max())
+            assert delta.max() <= 1, ('Detected body differs from known inset',inset,scale,width,height,radius,delta.max())
             control('close')
         control('scale', 1)
         control('body-overlay')

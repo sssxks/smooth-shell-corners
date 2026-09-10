@@ -8,6 +8,7 @@ const source = readFileSync(new URL('../../dist/effects/body-detector.js', impor
 
 function setup() {
     const timers = new Map();
+    const delays = [];
     let timerId = 0, repaints = 0, draws = 0;
     const Cogl = {
         PixelFormat: {RGBA_FP_32323232_PRE: 1}, SnippetHook: {}, PipelineFilter: {}, PipelineWrapMode: {},
@@ -27,7 +28,8 @@ function setup() {
         Cogl, Graphene: {Matrix: class { init_identity() { return this; } }},
         GLib: {PRIORITY_DEFAULT: 0, SOURCE_REMOVE: false,
             timeout_add: (_priority, milliseconds, callback) => {
-                assert.equal(milliseconds, 180);
+                assert.ok([180, 1000].includes(milliseconds));
+                delays.push(milliseconds);
                 timers.set(++timerId, callback); return timerId;
             }, source_remove: id => timers.delete(id)},
         BODY_PROBE_DECLARATIONS: '', BODY_PROBE_CODE: '',
@@ -42,15 +44,16 @@ function setup() {
     const tick = () => {
         const entries = [...timers.values()]; timers.clear(); entries.forEach(callback => callback());
     };
-    return {detector, render, tick, timers, draws: () => draws, repaints: () => repaints};
+    return {detector, render, tick, timers, delays, draws: () => draws, repaints: () => repaints};
 }
 
-test('startup makes three bounded attempts, then content frames do not scan', () => {
+test('startup makes three bounded attempts, then idle frames do not scan', () => {
     const s = setup();
     s.render(); s.tick(); s.render(); s.tick(); s.render();
     assert.equal(s.detector.revision, 3);
     assert.equal(s.draws(), 6);
     assert.equal(s.timers.size, 0);
+    assert.deepEqual(s.delays, [180, 180]);
     for (let i = 0; i < 100; i++) s.render();
     assert.equal(s.draws(), 6);
 });
@@ -77,4 +80,25 @@ test('destroying or excluding a window cancels the pending detector callback', (
     s.detector.dispose(); s.tick();
     assert.equal(s.repaints(), 0);
     assert.equal(s.timers.size, 0);
+});
+
+test('delayed content schedules one scan without a geometry change or idle polling', () => {
+    const s = setup();
+    s.render(); s.tick(); s.render(); s.tick(); s.render();
+    for (let i = 0; i < 120; i++) {
+        s.detector.contentChanged();
+        s.render();
+    }
+    assert.equal(s.detector.revision, 3);
+    assert.equal(s.timers.size, 1);
+    assert.deepEqual(s.delays, [180, 180, 1000]);
+    s.tick(); s.render();
+    assert.equal(s.detector.revision, 4);
+    assert.equal(s.timers.size, 0);
+    s.tick(); s.render();
+    assert.equal(s.detector.revision, 4);
+    s.detector.contentChanged();
+    s.detector.dispose(); s.tick();
+    assert.equal(s.timers.size, 0);
+    assert.equal(s.detector.pending, false);
 });

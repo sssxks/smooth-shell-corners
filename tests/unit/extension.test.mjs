@@ -92,27 +92,13 @@ function setupWindowLifecycle(ready = true) {
         get_effect(name) { return this.effects.get(name) ?? null; },
         add_effect_with_name(name, effect) { this.effects.set(name, effect); },
         remove_effect_by_name(name) { this.effects.delete(name); },
-        get_first_child() { return this; },
         get_texture() { return ready ? this : null; },
-        bind_property(prop, target) {
-            const copy = () => { target[prop] = this[prop]; };
-            copy();
-            const id = this.connect(`notify::${prop}`, copy);
-            return {unbind: () => this.disconnect(id)};
-        },
-        opacity: 255,
     });
-    const shadow = {
-        destroyed: false,
-        get_constraints: () => [],
-        get_parent: () => null,
-        clear_effects() {},
-        destroy() { this.destroyed = true; },
-    };
     const windowManager = emitter();
     class Timeline {}
     const timeline = Object.assign(new Timeline(), emitter());
     const actors = [actor];
+    const config = {customShadow: true, keepShadowMaximized: false, focusedShadow: {opacity: 115}, unfocusedShadow: {opacity: 18}};
     const state = vm.runInNewContext(`${source}
         _settings = settings;
         scaleFactor = () => 1;
@@ -121,18 +107,12 @@ function setupWindowLifecycle(ready = true) {
     `, {
         Extension: class {},
         settings: {...emitter(), get_boolean: key => key === 'custom-shadow'},
-        shadow,
-        readConfig: () => ({customShadow: true}),
+        readConfig: () => config,
         computeWindowBounds: () => ({}),
-        refreshWindowShadowStyle() {},
-        refreshWindowShadowClip() {},
-        createWindowShadow: () => shadow,
         global: {get_window_actors: () => actors, display: {...emitter(), get_monitor_scale: () => 1}, windowManager},
         Main: {layoutManager: emitter()},
         Clutter: {Timeline},
-        GObject: {BindingFlags: {SYNC_CREATE: 1}},
-        RoundedCornersEffect: class { updateUniforms() {} },
-        refreshShadowGeometry() {},
+        RoundedCornersEffect: class { updateUniforms(...args) { this.shadow = args[4]; } },
         shouldSkipWindow: () => false,
         clearWindowFilterCache() {},
         clearShadowCache() {},
@@ -141,7 +121,7 @@ function setupWindowLifecycle(ready = true) {
             connections.length = 0;
         },
     });
-    return {...state, actor, shadow, actors, windowManager, timeline, ready() { ready = true; actor.emit('notify::size'); }};
+    return {...state, actor, config, actors, windowManager, timeline, ready() { ready = true; actor.emit('notify::size'); }};
 }
 
 for (const finish of ['destroy', 'disable']) {
@@ -203,3 +183,30 @@ for (const finish of ['completed', 'disable']) {
         state.disable();
     });
 }
+
+test('maximised and fullscreen shadows follow the setting independently of corners', () => {
+    const s = setupWindowLifecycle();
+    const effect = s.actor.get_effect('ssc-rounded-corners');
+    const refresh = () => s.actor.emit('notify::size');
+    for (const flag of ['maximizedHorizontally', 'maximizedVertically', 'fullscreen']) {
+        s.actor.metaWindow[flag] = true;
+        for (const focused of [false, true]) {
+            s.actor.metaWindow.appears_focused = focused;
+            s.config.keepShadowMaximized = false;
+            refresh();
+            assert.equal(effect.shadow, undefined);
+            assert.equal(s.actor.get_effect('ssc-rounded-corners'), effect);
+            s.config.keepShadowMaximized = true;
+            refresh();
+            assert.equal(effect.shadow, focused ? s.config.focusedShadow : s.config.unfocusedShadow);
+        }
+        s.actor.metaWindow[flag] = false;
+    }
+    s.config.keepShadowMaximized = false;
+    refresh();
+    assert.equal(effect.shadow, s.config.focusedShadow);
+    s.config.customShadow = false;
+    refresh();
+    assert.equal(effect.shadow, undefined);
+    s.disable();
+});

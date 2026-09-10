@@ -46,6 +46,12 @@ app.connect('activate', () => {
         });
         app.add_action(createBody);
     }
+    const inset = new Gio.SimpleAction({name: 'body-inset'});
+    inset.connect('activate', () => {
+        const panel = extra.get_child().get_child();
+        panel.margin_start = panel.margin_end = panel.margin_top = panel.margin_bottom = 32;
+    });
+    app.add_action(inset);
     const close = new Gio.SimpleAction({name: 'close'});
     close.connect('activate', () => { extra?.destroy(); extra = null; });
     app.add_action(close);

@@ -1,5 +1,10 @@
 # GPU rectangular-body detection — 2026-09-10
 
+> Historical measurements below predate damage-triggered detection. The current
+> implementation coalesces content damage into at most one check per second.
+> Idle windows still schedule no checks; the old damage timings are not a
+> performance claim for this revised policy.
+
 This follow-up to `cabf931` identifies a rectangular app body without constructing
 an alpha silhouette or reading pixels back to the CPU. The baseline shared-tile
 implementation is committed separately; measurements below use its isolated
