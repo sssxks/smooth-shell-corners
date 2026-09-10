@@ -32,12 +32,10 @@ def profiles(alpha):
 
 
 def shadow(blur, spread, y=0, width=256):
-    size = width + 160  # Production actor padding is 80px per side.
+    size = width + 160  # Fixed comparison canvas with 80px exterior per side.
     values = dict(effectShadowHole=(80, 80, width+80, width+80), effectShadowHoleRadius=8,
                   effectShadowExp=2, effectShadowOffset=(0, y),
-                  effectShadowRectOrigin=(0, 0), effectShadowRectSize=(size, size),
-                  fillPadding=1, sampleBounds=(0, 0, 1, 1),
-                  pixelStep=(1/size, 1/size), textureOrigin=(0, 0))
+                  effectShadowRectOrigin=(0, 0), effectShadowRectSize=(size, size))
     return render(pixels, values, size=size,
                   work_size=size,
                   spread=spread, blur_step=blur/4, rect_size=size) / 255

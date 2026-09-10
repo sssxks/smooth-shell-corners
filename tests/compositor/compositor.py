@@ -50,7 +50,7 @@ import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {{checkWindowFilter}} from '{repo.as_uri()}/tests/compositor/window-filter.js';
 import Extension from '{repo.as_uri()}/dist/extension.js';
-import {{RoundedCornersEffect}} from '{repo.as_uri()}/dist/effects/rounded-corners.js';
+import {{RoundedCornersEffect, clearShadowCache}} from '{repo.as_uri()}/dist/effects/rounded-corners.js';
 import {{shadowFixture}} from '{repo.as_uri()}/tests/compositor/shadow-fixture.js';
 const Pass = GObject.registerClass(class SSCProbePass extends Shell.GLSLEffect {{
     vfunc_build_pipeline() {{ this.add_glsl_snippet(Cogl.SnippetHook.FRAGMENT, '', '', false); }}
@@ -64,7 +64,7 @@ export default class Probe {{
         const settings = extension.getSettings();
         settings.set_boolean('skip-libadwaita-app', false);
         settings.set_boolean('keep-rounded-maximized', false);
-        global.ssc = {{RoundedCornersEffect, Pass, Clutter, overview: Main.overview, makeShadow: shadowFixture, extension, settings, checkWindowFilter}};
+        global.ssc = {{RoundedCornersEffect, clearShadowCache, Pass, Clutter, overview: Main.overview, makeShadow: shadowFixture, extension, settings, checkWindowFilter}};
         this.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {{
             Main.overview.hide();
             this.owner = Gio.bus_own_name(Gio.BusType.SESSION, 'org.example.SSCProbe',
@@ -254,6 +254,34 @@ export default class Probe {{
         evaluate("global.ssc.shadowFixture.forEach(a => a.destroy()); global.ssc.shadowFixture = null; true;")
         control("scale", 1)
         print("Reused source/shadow capacity matches fresh allocations at all four scales.", flush=True)
+
+        # Real Cogl cache reuse and alpha-content independence, including GPU
+        # purge. Compare translucent interiors with the shadow switched off.
+        for scale in [1, 1.25, 1.5, 2]:
+            control("scale", scale)
+            evaluate(f"global.ssc.clearShadowCache(); global.ssc.makeShadow(true, 24, 7, 3, -2, {scale}, 600, 400)")
+            capture("tile-initial")
+            assert evaluate("global.ssc.shadowBakes") == 1
+            evaluate("global.ssc.resizeShadow(620, 420)")
+            capture("tile-resized")
+            evaluate("global.ssc.shadowFixture[0].style = 'background: rgba(0,0,0,0.5);'; true;")
+            translucent = capture("tile-translucent")
+            assert evaluate("global.ssc.shadowBakes") == 1
+            evaluate("global.ssc.fixtureEffect._shadowEnabled = false; global.ssc.fixtureEffect.queue_repaint(); true;")
+            no_shadow = capture("translucent-without-shadow")
+            interior = (slice(round(270*scale), round(550*scale)),
+                        slice(round(270*scale), round(740*scale)))
+            assert np.array_equal(translucent[interior], no_shadow[interior]), "Shadow darkened translucent interior"
+            assert np.any(translucent != no_shadow), "Missing exterior shadow"
+            evaluate("global.ssc.fixtureEffect._shadowEnabled = true; global.stage.emit('gl-video-memory-purged'); true;")
+            purged = capture("tile-purged")
+            assert evaluate("global.ssc.shadowBakes") == 2
+            region = (slice(0, round(700*scale)), slice(0, round(900*scale)))
+            delta = abs(purged[region] - translucent[region])
+            assert delta.max() <= 1, "Purge changed the shadow"
+        evaluate("global.ssc.shadowFixture.forEach(a => a.destroy()); global.ssc.shadowFixture = null; true;")
+        control("scale", 1)
+        print("Shared tiles survive resize/content damage; translucent interiors and GPU purge passed.", flush=True)
 
         # New app content must invalidate the cached framebuffer.
         control("change")

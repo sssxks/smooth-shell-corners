@@ -174,7 +174,8 @@ export function addApplicationPreferences(win: Adw.PreferencesWindow, settings: 
             title:       _('Exceptions list'),
             description: _('Application identifiers, one per line. You can use WM_CLASS, Wayland app IDs, ' +
                            'or desktop file IDs. In normal mode these windows are EXCLUDED; enable ' +
-                           'whitelist mode to ONLY apply rounded corners to them.'),
+                           'whitelist mode to ONLY apply effects to them. Exclude apps that draw their own shape ' +
+                           'to bypass clipping, corners, borders, padding fill, and custom shadows.'),
         });
         appsPage.add(listGroup);
 

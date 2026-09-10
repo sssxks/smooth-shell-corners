@@ -27,6 +27,13 @@ export function shadowFixture(fill, blur, spread, xOffset, yOffset, scale, width
     const config = readConfig(settings);
     const effect = new RoundedCornersEffect();
     actor.add_effect(effect);
+    global.ssc.shadowBakes = 0;
+    const bake = effect._renderShadowTexture.bind(effect);
+    effect._renderShadowTexture = geometry => {
+        global.ssc.shadowBakes++;
+        return bake(geometry);
+    };
+    global.ssc.fixtureEffect = effect;
     const update = () => effect.updateUniforms(1, config, computeBounds(actor, 1, fill), scale,
         {opacity: 255, blur, spread, xOffset, yOffset});
     update();

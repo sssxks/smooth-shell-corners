@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {test} from 'node:test';
+import {shadowGeometry} from '../../dist/effects/shadow-geometry.js';
 
 // Run the real uniform setup without requiring a running GNOME Shell.
 const source = readFileSync(new URL('../../dist/effects/rounded-corners.js', import.meta.url), 'utf8')
     .replace(/^import \{[\s\S]*?\} from '\.\/shaders\.js';$/m, '')
-    .replace(/^import .*;$/gm, '').replaceAll('export const ', 'const ');
+    .replace(/^import .*;$/gm, '').replaceAll('export const ', 'const ').replaceAll('export function ', 'function ');
 class EffectBase {
     actor = {
         get_width: () => 100, get_height: () => 80,
@@ -33,7 +34,7 @@ const ROUNDED_CODE = '';
 const Effect = vm.runInNewContext(`${source}\nRoundedCornersEffect`, {
     GObject: {registerClass: (_meta, cls) => cls}, Shell: {GLSLEffect: EffectBase},
     Clutter: {Effect: EffectBase}, Cogl, Graphene: {},
-    FILL_DECLARATIONS, FILL_CODE, ROUNDED_DECLARATIONS, ROUNDED_CODE,
+    shadowGeometry, FILL_DECLARATIONS, FILL_CODE, ROUNDED_DECLARATIONS, ROUNDED_CODE,
 });
 const cfg = {
     padding: {left: 2, top: 2, right: 2, bottom: 2},
@@ -152,97 +153,141 @@ const paintCogl = {
 const PaintEffect = vm.runInNewContext(`${source}\nRoundedCornersEffect`, {
     GObject: {registerClass: (_meta, cls) => cls}, Clutter: paintClutter, Cogl: paintCogl,
     Graphene: {Matrix: class { init_identity() { return this; } }},
-    FILL_DECLARATIONS, FILL_CODE, ROUNDED_DECLARATIONS, ROUNDED_CODE,
+    shadowGeometry, FILL_DECLARATIONS, FILL_CODE, ROUNDED_DECLARATIONS, ROUNDED_CODE,
 });
 
-for (const scenario of ['first paint', 'content update', 'resize', 'resize grows', 'resize shrinks', 'cached repaint', 'pixel phase', 'scale', 'GPU purge', 'disabled update']) {
-    test(`shadow reads current rendered content on ${scenario}`, () => {
-        const fx = new PaintEffect();
-        let purge;
-        const stage = {connect: (_signal, callback) => { purge = callback; return 1; }};
-        Object.assign(fx.actor, {
-            revision: 1, paintCount: 0, get_stage: () => stage,
-            get_transformed_size: () => [fx.actor.get_width(), 80],
-            get_transformed_position: () => [0, 0], is_in_clone_paint: () => false,
-            get_paint_opacity: () => 255,
-        });
-        if (scenario === 'resize shrinks') fx.actor.get_width = () => 300;
-        fx._pipeline = {set_layer_texture() {}, set_layer_null_texture() {}, set_color() {}, set_uniform_float() {}};
-        fx._shadowEnabled = true;
-        fx._shadowPipeline = {set_layer_texture() {}, set_layer_null_texture() {}, set_uniform_float() {}};
-        fx._shadowUniforms = {};
-        fx._updateTextureMapping = () => {};
-        const revisions = [];
-        fx._renderShadowTexture = texture => { revisions.push(texture.revision); return texture; };
-        const paint = flags => {
-            const root = new PaintNode();
-            fx.vfunc_paint(root, {}, flags);
-            root.paint({});
-        };
-        paint(1);
-        const originalFramebuffer = fx._framebuffer;
-        if (scenario !== 'first paint') {
-            if (scenario !== 'cached repaint') fx.actor.revision = 2;
-            if (scenario.startsWith('resize'))
-                fx.actor.get_width = () => scenario === 'resize grows' ? 300 : scenario === 'resize shrinks' ? 100 : 120;
-            if (scenario === 'pixel phase') fx.actor.get_transformed_position = () => [0.5, 0];
-            if (scenario === 'scale') fx._paintScale = 1.5;
-            if (scenario === 'GPU purge') purge();
-            if (scenario === 'disabled update') {
-                fx._shadowEnabled = false;
-                paint(1);
-                fx._shadowEnabled = true;
-            }
-            paint(scenario === 'content update' ? 1 : 0);
-        }
-        if (scenario === 'resize') assert.equal(fx._framebuffer, originalFramebuffer);
-        if (scenario === 'resize grows' || scenario === 'resize shrinks')
-            assert.notEqual(fx._framebuffer, originalFramebuffer);
-        if (scenario === 'resize shrinks') assert.equal(fx._framebuffer.get_width(), 128);
-        assert.equal(revisions.at(-1), fx.actor.revision);
-        assert.equal(revisions.length, scenario === 'first paint' || scenario === 'cached repaint' ? 1 : 2);
-        assert.equal(fx.actor.paintCount, scenario === 'first paint' || scenario === 'cached repaint' ? 1 : 2);
+function shadowEffect(width = 600, height = 400) {
+    const fx = new PaintEffect();
+    let purge;
+    const stage = {connect: (_signal, callback) => { purge = callback; return 1; }};
+    Object.assign(fx.actor, {
+        revision: 1, paintCount: 0, get_stage: () => stage,
+        get_width: () => width, get_height: () => height,
+        get_transformed_size: () => [fx.actor.get_width(), fx.actor.get_height()],
+        get_transformed_position: () => [0, 0], is_in_clone_paint: () => false,
+        get_paint_opacity: () => 255,
     });
+    fx._pipeline = {set_layer_texture() {}, set_layer_null_texture() {}, set_color() {}, set_uniform_float() {}};
+    fx._ensureShadowPipeline = () => {
+        if (fx._shadowPipeline) return;
+        fx._shadowPipeline = {texture: null,
+            set_layer_texture(_layer, texture) { this.texture = texture; },
+            get_layer_texture() { return this.texture; },
+            set_layer_null_texture() { this.texture = null; }, set_uniform_float() {}};
+        fx._shadowUniforms = {};
+    };
+    fx._ensureShadowPipeline();
+    fx._shadowEnabled = true;
+    fx._shadowHoleRadius = 24;
+    fx._shadowBlur = 12;
+    fx._shadowSpread = 3;
+    fx._updateTextureMapping = () => {};
+    fx.bakes = 0;
+    fx._renderShadowTexture = geometry => {
+        fx.bakes++;
+        return {get_width: () => Math.ceil((geometry.width + 2 * geometry.margin) * fx._paintScale),
+            get_height: () => Math.ceil((geometry.height + 2 * geometry.margin) * fx._paintScale)};
+    };
+    fx.paint = (flags = 0) => {
+        fx._shadowHole = [0, 0, fx.actor.get_width(), fx.actor.get_height()];
+        const root = new PaintNode();
+        fx.vfunc_paint(root, {}, flags);
+        root.paint({});
+    };
+    fx.purge = () => purge();
+    // Purge the shared cache so tests do not depend on execution order.
+    fx.paint(1);
+    fx.purge();
+    fx.bakes = 0;
+    fx.paint(1);
+    return fx;
 }
 
+test('content, resize, movement and opacity reuse the tile while content stays current', () => {
+    const fx = shadowEffect();
+    const originalPaints = fx.actor.paintCount;
+    for (let i = 0; i < 5; i++) {
+        fx.actor.revision++;
+        fx.actor.get_width = () => 600 + i * 20;
+        fx.actor.get_transformed_position = () => [i / 4, 0];
+        fx._shadowOpacity = i / 5;
+        fx._shadowOffset = [i, -i];
+        fx.paint(1);
+        assert.equal(fx._framebuffer.get_texture().revision, fx.actor.revision);
+    }
+    assert.equal(fx.bakes, 1);
+    assert.equal(fx.actor.paintCount, originalPaints + 5);
+});
 
-test('shadow shares fill toggle, sample bounds and fractional texture mapping with the window', () => {
-    const fx = new Effect();
-    fx._shadowMaskPipeline = Cogl.Pipeline.new();
-    const keys = ['fillPadding', 'sampleBounds', 'pixelStep', 'textureOrigin'];
-    fx._shadowMaskUniforms = Object.fromEntries(keys.map(key => [key, key]));
-    for (const fillPadding of [true, false, true]) {
-        fx.updateUniforms(1, {...cfg, fillPadding}, frame, 1.5);
-        fx._updateTextureMapping(151, 121, -1 / 3, -1 / 3);
-        for (const key of keys)
-            assert.deepEqual(plain(fx._shadowMaskPipeline.values[key]), plain(fx.values[key]));
+test('different windows share tiles, while scale, filters and GPU purge regenerate them', () => {
+    const first = shadowEffect();
+    const second = shadowEffect(800, 700);
+    first.bakes = 0;
+    first.paint();
+    assert.equal(first.bakes, 0);
+    for (const change of [() => { first._paintScale = 1.5; },
+        () => { first._shadowBlur++; }, () => { first._shadowSpread++; },
+        () => { first._shadowHoleRadius++; }, () => { first._shadowExponent++; },
+        () => first.purge()]) {
+        const before = first.bakes;
+        change();
+        first.paint();
+        assert.equal(first.bakes, before + 1);
+    }
+    assert.equal(second.bakes, 1);
+});
+
+test('small-window resizing regenerates geometry without stale source capacity', () => {
+    const fx = shadowEffect(50, 40);
+    const original = fx._framebuffer;
+    fx.actor.get_width = () => 60;
+    fx.paint();
+    assert.equal(fx.bakes, 2);
+    assert.equal(fx._framebuffer, original);
+    fx.actor.get_width = () => 300;
+    fx.paint();
+    assert.notEqual(fx._framebuffer, original);
+});
+
+test('nine-slice geometry preserves small axes and fractional right-edge phase', () => {
+    for (const scale of [1, 1.25, 1.5, 2]) {
+        const shape = (w, h) => shadowGeometry(w, h, 24, 8, 23, -2, scale);
+        const a = shape(800, 600), b = shape(1000, 900);
+        assert.equal(a.key, b.key);
+        const small = shape(30, 900);
+        assert.equal(small.width, 30);
+        assert.equal(small.height, a.height);
+        const fractional = shape(801, 603);
+        near([fractional.width * scale % 1, fractional.height * scale % 1],
+            [801 * scale % 1, 603 * scale % 1]);
     }
 });
 
-test('shadow cache survives identical settings and opacity but invalidates filter inputs', () => {
-    const fx = new Effect();
-    fx._ensureShadowPipeline = () => {};
-    const shadow = {opacity: 115, blur: 24, spread: 7, xOffset: 0, yOffset: 0};
-    fx.updateUniforms(1, cfg, frame, 1.5, shadow);
-    const cached = {};
-    fx._shadowTexture = cached;
-    fx.updateUniforms(1, {...cfg}, {...frame}, 1.5, {...shadow, opacity: 80});
-    assert.equal(fx._shadowTexture, cached);
-    for (const change of [
-        {blur: 25}, {spread: 8}, {xOffset: 2}, {yOffset: 3}, {opacity: 0},
-    ]) {
-        fx.updateUniforms(1, cfg, frame, 1.5, shadow);
-        fx._shadowTexture = cached;
-        fx.updateUniforms(1, cfg, frame, 1.5, {...shadow, ...change});
-        assert.equal(fx._shadowTexture, null);
+test('shared cache evicts old styles instead of growing with settings changes', () => {
+    const fx = shadowEffect();
+    const original = fx._shadowBlur;
+    for (let i = 1; i <= 20; i++) {
+        fx._shadowBlur = original + i;
+        fx.paint();
     }
-    for (const change of [
-        {fillPadding: false}, {cornerRadius: 20}, {smoothing: 0.1},
-        {padding: {...cfg.padding, left: 3}},
-    ]) {
-        fx.updateUniforms(1, cfg, frame, 1.5, shadow);
-        fx._shadowTexture = cached;
-        fx.updateUniforms(1, {...cfg, ...change}, frame, 1.5, shadow);
-        assert.equal(fx._shadowTexture, null);
-    }
+    const before = fx.bakes;
+    fx._shadowBlur = original;
+    fx.paint();
+    assert.equal(fx.bakes, before + 1);
+});
+
+test('oversized active styles are retained without rebaking or evicting shared tiles', () => {
+    const fx = shadowEffect();
+    const another = shadowEffect();
+    fx.actor.get_width = () => 4000;
+    fx.actor.get_height = () => 3000;
+    fx._shadowHoleRadius = 600;
+    fx._paintScale = 2;
+    fx.paint();
+    const baked = fx.bakes;
+    for (let i = 0; i < 5; i++) fx.paint(1);
+    assert.equal(fx.bakes, baked);
+    const otherBakes = another.bakes;
+    another.paint();
+    assert.equal(another.bakes, otherBakes);
 });

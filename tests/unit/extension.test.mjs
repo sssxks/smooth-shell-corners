@@ -135,6 +135,7 @@ function setupWindowLifecycle(ready = true) {
         refreshShadowGeometry() {},
         shouldSkipWindow: () => false,
         clearWindowFilterCache() {},
+        clearShadowCache() {},
         disconnectSignals(connections) {
             for (const {object, id} of connections) object.disconnect(id);
             connections.length = 0;

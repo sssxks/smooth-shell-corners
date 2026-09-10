@@ -27,8 +27,9 @@ Each mode (off, corners, shadows) contains one-second warmups and four-second
 measurements of static idle, moving one window, and damaging one window at
 roughly 60 Hz, followed by damaging all four windows together. Damage requests repaint of one actor, simulating an updating
 application without needing a particular app/version. The other three windows
-stay unchanged in the single-window cases. The final case exposes filtering
-cost when every source is dirty and the shadow cache cannot help. This is useful for reproducing the compositor cost of a live
+stay unchanged in the single-window cases. The final case exposed filtering
+cost in the former content-silhouette renderer. Geometry tiles now remain valid
+when sources are dirty; mask/spread/blur passes should be absent after warmup. This is useful for reproducing the compositor cost of a live
 graph on an otherwise quiet desktop.
 
 `timer.rs` interposes EGL's function resolver, then wraps the actual GL draws,
@@ -113,7 +114,8 @@ marks a revision good. For another regression, measure endpoints and choose
 a new threshold first. Name the checker `bisect-check.py`, not `bisect.py`,
 which would shadow Python's standard-library module used by the analyzer.
 
-See [the measured regression and pass breakdown](results.md).
+See [the measured regression and pass breakdown](results.md), and the subsequent
+[geometry-shadow implementation and fresh comparison](geometry-shadows.md).
 
 ## Resize memory regression
 

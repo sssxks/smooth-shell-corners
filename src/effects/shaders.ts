@@ -76,17 +76,12 @@ export const ROUNDED_CODE = /* glsl */`
     }
 `;
 
-// Rasterize the visible alpha silhouette before spread and blur. Share the
-// window texture mapping so filled padding casts the same shadow as content.
+// Rasterize only the configured geometry. Application pixels never enter the shadow.
 export const EFFECT_SHADOW_MASK_DECLARATIONS = /* glsl */`
 uniform vec4  effectShadowHole;
 uniform float effectShadowHoleRadius;
 uniform float effectShadowExp;
 uniform vec2  effectShadowOffset;
-uniform float fillPadding;
-uniform vec4 sampleBounds;
-uniform vec2 pixelStep;
-uniform vec2 textureOrigin;
 uniform vec2  effectShadowRectOrigin;
 uniform vec2  effectShadowRectSize;
 
@@ -119,28 +114,19 @@ float effectOpacity(vec2 p, vec4 b, float r, float e) {
     return e <= 2.0 ? effectCircle(p, c, r) : effectSquircle(p, c, r, e);
 }
 
-float effectOpaqueSilhouette(vec2 p) {
-    vec2 q = p - effectShadowOffset;
-    float shape = effectOpacity(q, effectShadowHole,
-                                effectShadowHoleRadius, effectShadowExp);
-    if (shape <= 0.0)
-        return 0.0;
-    vec2 uv = (q - textureOrigin) * pixelStep;
-    if (fillPadding > 0.5)
-        uv = clamp(uv, sampleBounds.xy, sampleBounds.zw);
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
-        return 0.0;
-    return texture2D(cogl_sampler0, uv).a * shape > 0.001 ? 1.0 : 0.0;
+float effectGeometryMask(vec2 p) {
+    return effectOpacity(p - effectShadowOffset, effectShadowHole,
+                         effectShadowHoleRadius, effectShadowExp) > 0.001 ? 1.0 : 0.0;
 }
 `;
 
 export const EFFECT_SHADOW_MASK_CODE = /* glsl */`
     vec2 p = cogl_tex_coord_in[0].xy * effectShadowRectSize + effectShadowRectOrigin;
-    float alpha = effectOpaqueSilhouette(p);
+    float alpha = effectGeometryMask(p);
     cogl_color_out = vec4(alpha);
 `;
 
-// Separable max/min filters dilate/erode every alpha boundary, including holes.
+// Separable max/min filters dilate/erode the geometry before blur.
 // A rectangular kernel keeps work linear in spread instead of quadratic.
 export const EFFECT_SHADOW_SPREAD_DECLARATIONS = /* glsl */`
 uniform vec2 effectShadowSpreadUvStep;
@@ -220,12 +206,28 @@ export const EFFECT_SHADOW_BLUR_CODE = /* glsl */`
 // Since this pass belongs to the window effect, overview clones transform it too.
 export const EFFECT_SHADOW_DECLARATIONS = /* glsl */`
 uniform float effectShadowOpacity;
+uniform vec2 effectShadowRectOrigin;
+uniform vec2 effectShadowRectSize;
+uniform vec2 effectShadowTileSize;
+uniform vec2 effectShadowTextureSize;
+uniform vec2 effectShadowOffset;
+uniform float effectShadowMargin;
+uniform float effectShadowEdge;
 `;
 
 export const EFFECT_SHADOW_CODE = /* glsl */`
-    float outer = texture2D(cogl_sampler0, cogl_tex_coord_in[0].xy).a;
+    vec2 p = effectShadowRectOrigin + cogl_tex_coord_in[0].xy * effectShadowRectSize;
+    vec2 local = p - bounds.xy - effectShadowOffset;
+    vec2 stretch = max(bounds.zw - bounds.xy - effectShadowTileSize, vec2(0.0));
+    vec2 tile = local - clamp(local - vec2(effectShadowEdge), vec2(0.0), stretch);
+    vec2 uv = (tile + vec2(effectShadowMargin)) / effectShadowTextureSize;
+    float outer = texture2D(cogl_sampler0, uv).a;
+    // Keep shadow under the antialiased edge, but never beneath the interior
+    // of a translucent window. The hole stays put when the shadow is offset.
+    vec4 hole = bounds + vec4(1.0, 1.0, -1.0, -1.0);
+    float interior = getOpacity(p, hole, max(clipRadius - 1.0, 0.0), exponent);
     cogl_color_out = vec4(0.0, 0.0, 0.0,
-                          outer * effectShadowOpacity);
+                          outer * (1.0 - interior) * effectShadowOpacity);
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────

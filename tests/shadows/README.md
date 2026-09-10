@@ -1,5 +1,11 @@
 # Shadow calibration (Bazzite / GNOME 50)
 
+Custom shadows now use [shared geometry tiles](../performance/gpu/geometry-shadows.md).
+The spread and Gaussian kernel remain the same; application alpha no longer
+defines the caster. The calibration harness uses a fixed exterior canvas around
+that geometry. The current unfocused holdout threshold fails identically on
+the previous renderer and geometry renderer; see the comparison report above.
+
 For the stable blur, spread-ordering fix and performance comparison, see
 [the blur/spread follow-up](blur-spread.md). The calibration figures below
 describe the earlier renderer.

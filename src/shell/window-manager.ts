@@ -7,7 +7,7 @@ import Meta from 'gi://Meta';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
-import {RoundedCornersEffect} from '../effects/index.js';
+import {RoundedCornersEffect, clearShadowCache} from '../effects/rounded-corners.js';
 import { setNativeRadiusRemoved } from '../native-radius.js';
 import {readConfig} from '../settings/config.js';
 import {clearWindowFilterCache, shouldSkip as shouldSkipWindow} from './window-filter.js';
@@ -264,6 +264,7 @@ function disableEffect() {
     for (const actor of _actorMap.keys())
         removeEffectFrom(actor);
     disconnectSignals(_connections);
+    clearShadowCache();
     
     if (_settingsTimeoutId) {
         GLib.source_remove(_settingsTimeoutId);

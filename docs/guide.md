@@ -56,6 +56,10 @@ Defaults approximate libadwaita 1.9.3 using the existing single-layer renderer:
 See [measurement method and results](../tests/shadows/README.md), or reproduce
 with `just calibrate-shadows`.
 
+Custom shadows follow the configured rounded rectangle, independent of app
+pixels. A translucent rectangular app can keep its corners and shadow without
+casting shadows around its text or darkening its interior.
+
 ### Applications tab
 
 | Setting | Description | Default |
@@ -65,6 +69,14 @@ with `just calibrate-shadows`.
 | Leave libhandy windows unchanged | Same, for legacy Handy apps | off |
 | Whitelist mode | Treat the exception list as a whitelist instead of a blacklist | off |
 | Exception list | One application identifier per line (`WM_CLASS`, Wayland app ID, or desktop ID) | — |
+
+For apps that draw an irregular shape, add their identifier to **Exception list**
+with **Whitelist mode** off. This removes the whole window effect: clipping,
+padding fill, corners, borders, and custom shadows. There is no automatic
+transparency scan: transparent decoration margins and translucent rectangular
+windows do not necessarily mean an app owns its shape. To preserve an excluded
+GTK4 app's native styling too, turn off **Replace native GTK4 corners** and restart
+it; that CSS override applies globally, including to excluded apps.
 
 #### Native GTK4 corner removal
 
@@ -196,6 +208,21 @@ painted density and aligns the framebuffer origin to physical pixels, including
 windows positioned between physical pixels. Overview clones use their projected
 paint size. Cached content is redrawn when the app updates or the sampling grid
 changes. No Mutter patch is needed.
+
+Shadows use shared geometry textures with fixed corners and stretchable straight
+sections. The spread and Gaussian blur are baked only when their geometry or
+style changes; application damage and ordinary resizing reuse the tile. Each
+axis too small to separate opposite corners is rendered at its actual size.
+Fractional edge phases can select different tiles. Overview clones sample the
+monitor-density tile. The final shader clears the unshifted window interior so
+shadow offsets do not darken translucent content.
+
+The shared cache retains at most 16 tiles / 16 MiB of RGBA8 texels, plus one
+reusable filter scratch target and textures referenced by active painting.
+Window content still needs its own framebuffer. Disabling clears the shared
+cache; a GPU-memory purge clears it and rebuilds tiles on demand. An oversized
+tile stays with its active window instead of evicting the shared cache. These limits
+are not a cap on total compositor VRAM or a promise of immediate driver reclamation.
 
 The shader uses a **squircle (superellipse)** formula:
 

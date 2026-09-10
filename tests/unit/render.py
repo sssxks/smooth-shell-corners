@@ -4,6 +4,9 @@
 # ///
 """Run with uv run tests/unit/render.py; uses headless EGL on Bazzite."""
 import re
+import json
+import math
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -142,7 +145,7 @@ shadow_composite_program = ctx.program(
     in vec2 uv;
     out vec4 cogl_color_out;
     uniform sampler2D cogl_sampler0;
-    """ + snippet("EFFECT_SHADOW_DECLARATIONS") + """
+    """ + snippet("ROUNDED_DECLARATIONS") + snippet("EFFECT_SHADOW_DECLARATIONS") + """
     void main() {
         vec4 cogl_tex_coord_in[1];
         cogl_tex_coord_in[0] = vec4(uv, 0, 1);
@@ -180,7 +183,7 @@ for program in [shadow_spread_program, shadow_blur_program]:
 
 
 def render_shadow(pixels, values, size=64, work_size=64, spread=0, blur_step=0, rect_size=64):
-    """Run the production mask, two spread, two blur and composite passes."""
+    """Run the production geometry mask and filters; return the uncut alpha."""
     source = ctx.texture((64, 64), 4, pixels)
     textures = [ctx.texture((work_size, work_size), 4) for _ in range(2)]
     for texture in [source, *textures]:
@@ -209,8 +212,8 @@ def render_shadow(pixels, values, size=64, work_size=64, spread=0, blur_step=0, 
             shadow_blur_vao.render(vertices=3)
     output.use()
     textures[0].use(location=0)
-    shadow_composite_program['effectShadowOpacity'].value = 1
-    shadow_composite_vao.render(vertices=3)
+    shadow_blur_program['effectShadowBlurUvStep'].value = (0, 0)
+    shadow_blur_vao.render(vertices=3)
     result = output.read(components=4)
     for resource in [output, *targets, *textures, source]:
         resource.release()
@@ -228,14 +231,12 @@ for scale in [1, 1.25, 1.5, 2]:
     blur_step = blur / 4
     work_size = size
     for exponent in [2, 8, 12]:
-        values = dict(effectShadowHole=(0, 0, 64, 64), effectShadowHoleRadius=12,
+        values = dict(effectShadowHole=(14, 14, 50, 50), effectShadowHoleRadius=12,
                       effectShadowExp=exponent, effectShadowOffset=(0, 0),
-                      effectShadowRectOrigin=(0, 0), effectShadowRectSize=(64, 64),
-                      fillPadding=0, sampleBounds=(0, 0, 1, 1),
-                      pixelStep=(1/64, 1/64), textureOrigin=(0, 0))
+                      effectShadowRectOrigin=(0, 0), effectShadowRectSize=(64, 64))
         alpha = render_shadow(source_pixels, values, size, work_size, blur_step=blur_step)
-        assert alpha[0, 0] == 0, (scale, exponent, 'Shadow leaked beyond the silhouette')
-        assert alpha[size // 2, size // 2] > 0, (scale, exponent, 'Silhouette was not sampled')
+        assert alpha[0, 0] == 0, (scale, exponent, 'Shadow leaked beyond the geometry')
+        assert alpha[size // 2, size // 2] > 0, (scale, exponent, 'Geometry was not rendered')
         assert alpha[size // 2, size // 2 - round(22 * scale)] > 0, (
             scale, exponent, 'Blur did not extend around the opaque boundary')
 
@@ -246,10 +247,10 @@ for scale in [1, 1.25, 1.5, 2]:
         transition = profile[(profile > 0) & (profile < 255)]
         assert len(np.unique(transition)) >= 8, (
             scale, exponent, 'Shadow edge contains discrete alpha plateaus', transition.tolist())
-print('Opaque silhouette blur is monotonic and free of sparse-sampling steps.')
+print('Geometry blur is monotonic and free of sparse-sampling steps.')
 
-# Regression tests intentionally exercise alpha boundaries inside the actor,
-# rather than only an opaque rectangle that hides incorrect spread/fill.
+# Independent CPU references validate the filters; geometry tests below validate
+# the assembled shadow and its independence from application content.
 
 class ShadowRegressions(unittest.TestCase):
     def test_spread_matches_full_cpu_extremum(self):
@@ -340,9 +341,7 @@ class ShadowRegressions(unittest.TestCase):
         pixels = bytes([0, 0, 0, 255]) * 64 * 64
         values = dict(effectShadowHole=(64, 64, 320, 320), effectShadowHoleRadius=12,
                       effectShadowExp=8, effectShadowOffset=(0, 0),
-                      effectShadowRectOrigin=(0, 0), effectShadowRectSize=(384, 384),
-                      fillPadding=1, sampleBounds=(0, 0, 1, 1),
-                      pixelStep=(1/384, 1/384), textureOrigin=(0, 0))
+                      effectShadowRectOrigin=(0, 0), effectShadowRectSize=(384, 384))
         for scale in [1, 1.25, 1.5, 2]:
             size = round(384 * scale)
             for spread in [-2, 0, 7]:
@@ -358,17 +357,14 @@ class ShadowRegressions(unittest.TestCase):
                         self.assertGreaterEqual(mass + 0.02, previous)  # RGBA8 rounding
                         previous = mass
 
-    def mask(self, pixels, spread=0, fill=False, scale=1):
-        values = dict(effectShadowHole=(0, 0, 64, 64), effectShadowHoleRadius=0,
+    def mask(self, pixels, spread=0, scale=1):
+        values = dict(effectShadowHole=(14, 14, 50, 50), effectShadowHoleRadius=0,
                       effectShadowExp=2, effectShadowOffset=(0, 0),
-                      effectShadowRectOrigin=(0, 0), effectShadowRectSize=(64, 64),
-                      fillPadding=int(fill),
-                      sampleBounds=(8.5/64, 8.5/64, 55.5/64, 55.5/64),
-                      pixelStep=(1/64, 1/64), textureOrigin=(0, 0))
+                      effectShadowRectOrigin=(0, 0), effectShadowRectSize=(64, 64))
         size = round(64 * scale)
         return render_shadow(pixels, values, size=size, work_size=size, spread=spread)
 
-    def test_positive_spread_expands_internal_alpha_edge(self):
+    def test_positive_spread_expands_geometry(self):
         for scale in [1, 1.25, 1.5, 2]:
             with self.subTest(scale=scale):
                 plain = self.mask(source_pixels, scale=scale)
@@ -379,7 +375,7 @@ class ShadowRegressions(unittest.TestCase):
                     self.assertEqual(int(spread[y, x]), 255)
                 self.assertEqual(int(spread[round(32*scale), round(5*scale)]), 0)
 
-    def test_negative_spread_contracts_internal_alpha_edge(self):
+    def test_negative_spread_contracts_geometry(self):
         for scale in [1, 1.25, 1.5, 2]:
             with self.subTest(scale=scale):
                 plain = self.mask(source_pixels, scale=scale)
@@ -390,14 +386,86 @@ class ShadowRegressions(unittest.TestCase):
                     self.assertEqual(int(spread[y, x]), 0)
                 self.assertEqual(int(spread[round(32*scale), round(32*scale)]), 255)
 
-    def test_fill_restores_transparent_margins_in_shadow(self):
-        pixels = bytes(c for y in range(64) for x in range(64)
-                       for c in (0, 0, 0, 255 if 8 <= x < 56 and 8 <= y < 56 else 0))
-        plain = self.mask(pixels)
-        filled = self.mask(pixels, fill=True)
-        for y, x in [(32, 1), (32, 62), (1, 32), (62, 32)]:
-            self.assertEqual(int(plain[y, x]), 0)
-            self.assertEqual(int(filled[y, x]), 255)
+    def test_geometry_is_independent_of_application_alpha(self):
+        opaque = bytes([0, 0, 0, 255]) * 64 * 64
+        transparent = bytes(64 * 64 * 4)
+        for pixels in [source_pixels, transparent]:
+            np.testing.assert_array_equal(self.mask(opaque), self.mask(pixels))
+
+    def test_nine_slice_matches_full_geometry(self):
+        cases = [(w, h, radius, exponent, blur, spread, scale)
+                 for scale in [1, 1.25, 1.5, 2]
+                 for w, h in [(401, 303), (43, 31), (35, 360), (400, 40)]
+                 for radius, exponent, blur, spread in [(0, 2, 0, 7), (12, 2, 8, -2.5), (15, 8, 24, 7)]]
+        # Ask the production JS for its tile geometry, so this also tests the
+        # support calculation and fractional right-edge phase, not a replica.
+        module = (Path(__file__).resolve().parents[2] / 'dist/effects/shadow-geometry.js').as_uri()
+        script = f"import {{shadowGeometry}} from '{module}'; let s=''; for await (const c of process.stdin) s+=c; console.log(JSON.stringify(JSON.parse(s).map(a=>shadowGeometry(...a))));"
+        plans = json.loads(subprocess.run(['node', '--input-type=module', '-e', script],
+                          input=json.dumps(cases), text=True, capture_output=True,
+                          check=True, timeout=10).stdout)
+        for case, plan in zip(cases, plans):
+            with self.subTest(case=case):
+                tiled = geometry_shadow(case, plan, (3, -2))
+                full = geometry_shadow(case, plan | {'width': case[0], 'height': case[1]}, (3, -2))
+                delta = np.abs(tiled.astype(np.int16) - full.astype(np.int16))
+                self.assertLessEqual(int(delta.max()), 1)
+                # Unshifted centre stays clear even when the shadow is offset.
+                pad, scale = plan['margin'], case[-1]
+                cy = round((pad + case[1] / 2 + 2) * scale)
+                cx = round((pad + case[0] / 2 - 3) * scale)
+                self.assertEqual(int(tiled[cy, cx]), 0)
+                if case[4] > 0 or case[5] > 0:
+                    self.assertGreater(int(tiled.max()), 0)
+
+
+def geometry_shadow(case, plan, offset):
+    width, height, radius, exponent, blur, spread, scale = case
+    pad = plan['margin']
+    tw, th = plan['width'], plan['height']
+    iw, ih = math.ceil((tw + 2 * pad) * scale), math.ceil((th + 2 * pad) * scale)
+    textures = [ctx.texture((iw, ih), 4) for _ in range(2)]
+    for tex in textures:
+        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        tex.repeat_x = tex.repeat_y = False
+    targets = [ctx.framebuffer([tex]) for tex in textures]
+    targets[0].use()
+    for key, value in dict(effectShadowHole=(0, 0, tw, th), effectShadowHoleRadius=radius,
+            effectShadowExp=exponent, effectShadowOffset=(0, 0),
+            effectShadowRectOrigin=(-pad, -pad), effectShadowRectSize=(iw/scale, ih/scale)).items():
+        shadow_mask_program[key].value = value
+    shadow_mask_vao.render(vertices=3)
+    for program, vao, amount, uniform, step in [
+        (shadow_spread_program, shadow_spread_vao, spread, 'effectShadowSpreadPixels', 'effectShadowSpreadUvStep'),
+        (shadow_blur_program, shadow_blur_vao, blur, 'effectShadowBlurPixels', 'effectShadowBlurUvStep')]:
+        program['effectShadowTextureScale'].value = (1, 1)
+        program['effectShadowTextureBounds'].value = (0.5/iw, 0.5/ih, (iw-0.5)/iw, (ih-0.5)/ih)
+        if not amount:
+            continue
+        program[uniform].value = amount * scale
+        for axis, direction in enumerate([(1/iw, 0), (0, 1/ih)]):
+            targets[1-axis].use()
+            textures[axis].use(location=0)
+            program[step].value = direction
+            vao.render(vertices=3)
+    ow, oh = math.ceil((width + 2 * pad) * scale), math.ceil((height + 2 * pad) * scale)
+    output = ctx.simple_framebuffer((ow, oh), components=4)
+    output.use()
+    textures[0].use(location=0)
+    for key, value in dict(effectShadowOpacity=1, bounds=(0, 0, width, height),
+            clipRadius=radius, exponent=exponent, effectShadowRectOrigin=(offset[0]-pad, offset[1]-pad),
+            effectShadowRectSize=(ow/scale, oh/scale), effectShadowTileSize=(tw, th),
+            effectShadowTextureSize=(iw/scale, ih/scale), effectShadowOffset=offset,
+            effectShadowMargin=pad, effectShadowEdge=plan['edge']).items():
+        shadow_composite_program[key].value = value
+    shadow_composite_vao.render(vertices=3)
+    result = np.frombuffer(output.read(components=4), dtype=np.uint8).reshape(oh, ow, 4)[:, :, 3].copy()
+    for resource in [output, *targets, *textures]:
+        resource.release()
+    for program in [shadow_spread_program, shadow_blur_program]:
+        program['effectShadowTextureScale'].value = (1, 1)
+        program['effectShadowTextureBounds'].value = (0, 0, 1, 1)
+    return result
 
 
 if __name__ == '__main__':
