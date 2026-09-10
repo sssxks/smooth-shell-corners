@@ -1,0 +1,15 @@
+Smooth Shell Corners
+Maintained by sssxks: https://github.com/sssxks/smooth-shell-corners
+
+Forked from Rounded Windows:
+https://github.com/Nathanaelrc/rounded-windows
+
+Includes code adapted from:
+- yilozt, rounded-window-corners: squircle shader and window-effect architecture
+  https://github.com/yilozt/rounded-window-corners
+- flexagoon, Rounded Window Corners Reborn: GJS adaptations and shadow handling
+  https://github.com/flexagoon/rounded-window-corners
+
+GNOME Shell and Mutter provided the platform and implementation references:
+https://gitlab.gnome.org/GNOME/gnome-shell
+https://gitlab.gnome.org/GNOME/mutter

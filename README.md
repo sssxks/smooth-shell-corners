@@ -1,457 +1,110 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/GNOME-45--50-4A86CF?style=flat-square&logo=gnome&logoColor=white" alt="GNOME 45–50">
-  <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="GPL-3.0">
-  <img src="https://img.shields.io/badge/JS-ES2022-F7DF1E?style=flat-square&logo=javascript&logoColor=black" alt="JavaScript">
-</p>
+# Smooth Shell Corners
 
-<h1 align="center">Smooth Shell Corners</h1>
+Consistent squircle corners across GNOME windows, with crisp text at fractional scaling.
 
-<p align="center">
-  A GNOME Shell extension that adds <strong>rounded corners</strong> to top-level windows —<br>
-  including apps that don't use libadwaita or libhandy (Firefox, VS Code, Chromium, Electron apps, JetBrains IDEs, etc.).<br>
-  GPU-accelerated GLSL shader. No build step, no bundler — pure JavaScript.
-</p>
+| Extension off | Smooth Shell Corners |
+|:--:|:--:|
+| ![Square sample window at 150% scaling](docs/images/before.png) | ![The same sample window with subtle rounded corners](docs/images/after.png) |
 
----
+Actual GNOME Shell 50.4 captures at 150% scaling using a GTK4 sample window.
+Demo settings: radius 12, smoothing 0.6, custom shadows on. These are a subtle
+preset, not the extension defaults. [Capture details](docs/images/README.md).
 
-This is a fork of [Nathanaelrc/rounded-windows](https://github.com/Nathanaelrc/rounded-windows)
-with interior pixel filling for clipped application borders and optional native
-GTK4 corner removal. It also keeps window text crisp under fractional scaling by
-rendering effects at the window's actual painted density and aligning them to
-physical pixels. Its UUID is `smooth-shell-corners@xks`, with a separate
-`org.gnome.shell.extensions.smooth-shell-corners` settings schema. It installs
-alongside Rounded Windows. Enable only one of them at a time to avoid applying
-two effects to the same windows. Upstream links refer to the original project;
-this fork's changes are in this checkout.
+[Download](https://github.com/sssxks/smooth-shell-corners/releases) ·
+[Settings guide](docs/guide.md) ·
+[Report a problem](https://github.com/sssxks/smooth-shell-corners/issues/new/choose) ·
+[Help test](docs/testing.md)
 
-## Table of contents
+## Why this extension?
 
-- [Screenshots](#screenshots)
-- [Features](#features)
-- [Requirements](#requirements)
-- [Installation — step by step](#installation--step-by-step)
-- [Uninstall](#uninstall)
-- [Configuration](#configuration)
-- [Troubleshooting](#troubleshooting)
-- [Reporting bugs](#reporting-bugs)
-- [How it works](#how-it-works)
-- [Credits](#credits)
-- [License](#license)
+- Adjust corners from circles to squircles, with optional borders and shadows.
+- Preserve text sharpness at fractional scaling with pixel-aligned rendering.
+- Fill narrow clipped application borders with pixels from inside the window.
+- Replace native GTK4 corners, or keep toolkit styling and exclude individual apps.
 
----
+This is a fork of [Rounded Windows](https://github.com/Nathanaelrc/rounded-windows).
+Its focus is rendering quality: fractional-scale text, clipped edges, and consistent
+corners and shadows. It has separate settings; enable only one window-corner
+extension at a time. There is no published head-to-head comparison with other extensions.
 
-## Screenshots
+## Compatibility and current limits
 
->_
+Early preview. Locally tested on **Bazzite, GNOME Shell 50.4, Wayland**.
+The isolated compositor checks cover 100%, 125%, 150% and 200% scaling.
+Metadata also allows GNOME 45–49, but this fork's renderer has **not been verified**
+on those versions. Mixed-monitor setups and interactions with other window effects
+need testers. [Testing scope and known limits](docs/testing.md).
 
----
+Corners apply to top-level windows; some menus, tooltips and app-drawn surfaces
+remain unchanged. Filling borders can stretch edge content such as scrollbars.
 
-## Features
+**Native GTK4 corner replacement is enabled by default.** It manages a marked CSS
+block in host and existing Flatpak GTK4 configuration files. Restart GTK4 apps
+after enabling or disabling it. You can turn it off in Applications settings.
+The override also affects GTK4 windows excluded from the extension's filters.
+[Details and recovery](docs/guide.md#native-gtk4-corner-removal).
 
-- **Rounded corners** — GLSL fragment shader applied per-window at draw time
-- **Squircle / superellipse** — adjustable smoothing (0 = circle, 1 = squircle)
-- **Custom shadow** — GPU-rendered rounded shadows with libadwaita-calibrated defaults and one strength control
-- **Border** — optional inner or outer coloured border with configurable width
-- **Toolkit-aware handling** — replace native GTK4 corners or leave libadwaita / libhandy windows unchanged
-- **Blacklist / Whitelist** — exclude or exclusively include apps by `WM_CLASS`, Wayland app ID, or desktop file ID
-- **GNOME 50 / Wayland aware** — matches native Wayland windows without depending on `WM_CLASS`
-- **Crisp text at fractional scaling** — pixel-aligned rendering avoids the blur caused by resampling window content
-- **Live settings** — all changes apply instantly without restarting the shell
+## Install a release
 
----
-
-## Requirements
-
-| Requirement | Version |
-|:------------|:--------|
-| GNOME Shell | 45 – 50 |
-| GLib (glib-compile-schemas) | any modern version |
-
-**Supported distributions** (all others with GNOME 45–50 also work):
-
-| Distribution | GNOME Shell |
-|:-------------|:------------|
-| Ubuntu 24.04 – 26.04 | 46 – 50 |
-| Fedora 40 – 44 | 46 – 50 |
-| Arch Linux (rolling) | 45 – 50 |
-| Debian Testing / Sid | 45 – 50 |
-| openSUSE Tumbleweed | 45 – 50 |
-
----
-
-## Installation — step by step
-
-### 1. Install dependencies
-
-You need `glib-compile-schemas` to compile the GSettings schema. Install it for your distro:
+Download `smooth-shell-corners@xks.shell-extension.zip` from
+[Releases](https://github.com/sssxks/smooth-shell-corners/releases).
+Open a terminal in the download folder and run:
 
 ```bash
-# Ubuntu / Debian
-sudo apt install libglib2.0-bin
-
-# Fedora / RHEL / CentOS
-sudo dnf install glib2
-
-# Arch Linux / Manjaro
-sudo pacman -S glib2
-
-# openSUSE
-sudo zypper install glib2-tools
+gnome-extensions install --force smooth-shell-corners@xks.shell-extension.zip
 ```
 
-### 2. Open this checkout
+Disable any other window-corner extension in the Extensions app. Log out and
+back in, then enable **Smooth Shell Corners** in Extensions, or run:
 
-Run the following commands from this Smooth Shell Corners checkout. Cloning the
-upstream URL in the credits gives you the original extension without these changes.
-
-### 3. Run the installer
-
-```bash
-chmod +x install.sh
-./install.sh
-```
-
-The script will:
-- Detect your GNOME Shell version and confirm it is supported
-- Compile the GSettings schema
-- Copy all extension files to `~/.local/share/gnome-shell/extensions/smooth-shell-corners@xks/`
-
-### 4. Restart GNOME Shell
-
-The extension is installed but not loaded yet. You need to restart the shell:
-
-**Wayland session (GNOME 50)**
-> Log out and log back in. There is no in-session restart on Wayland.
-
-**X11 session (GNOME 45–49)**
-> Press <kbd>Alt</kbd>+<kbd>F2</kbd>, type `r`, press <kbd>Enter</kbd>.
-
-### 5. Enable the extension
-
-First disable the original extension if you have it installed:
-
-```bash
-gnome-extensions disable rounded-windows@marcosgt.github.io
-```
-
-After restarting, enable it with one of these methods:
-
-**Option A — terminal:**
 ```bash
 gnome-extensions enable smooth-shell-corners@xks
-```
-
-**Option B — GUI:**
-Open the **Extensions** app (or **GNOME Tweaks → Extensions**) and toggle _Smooth Shell Corners_ on.
-
-### 6. Open settings (optional)
-
-```bash
 gnome-extensions prefs smooth-shell-corners@xks
 ```
 
-Or click the ⚙️ icon next to the extension in the Extensions app.
+Restart GTK4 apps so native corner replacement takes effect. Release ZIPs need
+no Node.js, npm, or source compilation. The extension is not yet listed on
+extensions.gnome.org.
 
----
+## Remove
 
-## Uninstall
-
-Turn off **Replace native GTK4 corners** and restart affected apps first.
-The installer also removes our CSS block before deleting the extension files:
-
-```bash
-./install.sh --uninstall
-```
-
-Then restart GNOME Shell (step 4 above).
-
----
-
-## Configuration
-
-### Corners tab
-
-| Setting | Description | Default |
-|:--------|:------------|:--------|
-| Radius | Corner radius in logical pixels | `12` |
-| Smoothing | `0` = circle · `1` = squircle (superellipse) | `0.6` |
-| Clip padding | Extra gap between the window edge and the clip boundary | `1` |
-| Fill clipped edges | Extend pixels from inside the padding to the original window bounds | off |
-| Border width | Positive = inner border · Negative = outer · `0` = none | `0` |
-| Border colour | RGBA colour picker | white |
-| Keep rounded when maximised | Apply corners even when a window fills the screen | off |
-| Keep rounded when full-screen | Apply corners in full-screen mode | off |
-
-To hide a 2px application border without opening seams between tiled windows,
-enable **Fill clipped edges**, set the four padding values to **2**, and set
-**Border width** to **0**. Padding follows the extension's monitor scaling.
-The shader repeats the nearest interior row/column without resizing the content;
-the corner mask and custom shadow use the original window footprint.
-
-Content touching the sampled edge (such as scrollbars or images) will stretch
-across the narrow strip. Transparent app backgrounds and client-drawn rounded
-corners can still show through: this samples the actual app pixels, not an
-inferred background color. Rounded corners and gaps configured in your tiling
-extension remain. Turning the option off restores ordinary clipping.
-
-### Shadow tab
-
-| Setting | Description | Default |
-|:--------|:------------|:--------|
-| Custom shadow | Replace the native shadow with a rounded one | off |
-| Shadow strength | Basic mode: adjust visual presence for both focus states | 100% (0–200%) |
-| Use advanced settings | Switch to independent manual parameters and “Shadow when maximised” | off |
-
-Basic mode uses a preset curve for opacity, blur and spread: 0% gives no
-shadow, 100% approximates the native look, and higher values add density with
-a modest increase in extent. Advanced mode replaces the strength slider with
-individual controls. Each mode remembers its own values; switching never
-copies, multiplies or resets them. Advanced mode initially uses the defaults
-below; existing manual adjustments are preserved.
-
-Defaults approximate libadwaita 1.9.3 using the existing single-layer renderer:
-
-|  | Focused | Unfocused |
-|:-|:--------|:----------|
-| Opacity | 115 / 255 | 18 / 255 |
-| Blur | 23 px | 13 px |
-| Spread | −2 px | 7 px |
-| X / Y offset | 0 / 0 px | 0 / 0 px |
-
-See [measurement method and results](tests/shadows/README.md), or reproduce
-with `just calibrate-shadows`.
-
-### Applications tab
-
-| Setting | Description | Default |
-|:--------|:------------|:--------|
-| Replace native GTK4 corners | Let the extension shape GTK4 windows; restart apps after changes | off |
-| Leave libadwaita windows unchanged | Use their toolkit-provided corners instead of this extension | on |
-| Leave libhandy windows unchanged | Same, for legacy Handy apps | off |
-| Whitelist mode | Treat the exception list as a whitelist instead of a blacklist | off |
-| Exception list | One application identifier per line (`WM_CLASS`, Wayland app ID, or desktop ID) | — |
-
-#### Native GTK4 corner removal
-
-Enable **Replace native GTK4 corners** to provide rectangular window content and
-remove the GTK client shadow so that
-the shader, avoiding samples from libadwaita's transparent native corners. This
-makes **Leave libadwaita windows unchanged** inapplicable while active, preserving
-your exclusion preference for when you turn it off. Your radius, smoothing and
-padding still apply.
-
-The extension manages a marked `window.csd { border-radius: 0; }` block in:
-
-- `$XDG_CONFIG_HOME/gtk-4.0/gtk.css` (normally `~/.config/gtk-4.0/gtk.css`)
-- `~/.var/app/<app-id>/config/gtk-4.0/gtk.css` for existing Flatpak app directories
-
-GTK reads these files when apps start. **Restart affected apps after enabling,
-disabling, or disabling the extension.** This includes the preferences window.
-The override affects GTK4 client-decorated windows generally, including windows
-excluded by the extension's application filters. It does not change GTK3,
-libhandy, Qt, or Electron styling, and does not target in-app dialogs or popovers.
-Apps using their own clipping may still need separate handling. No Flatpak
-permissions are changed; apps with custom configuration paths may not pick up
-the override. Toggle the setting off/on after adding new Flatpak apps.
-
-Existing CSS and edits outside our marked block are preserved. Disabling removes
-the block from each configuration; an otherwise empty `gtk.css` can remain.
-If a file cannot be updated, GNOME shows an error. Files successfully changed
-during a failed enable are cleaned up. If Shell crashes or the extension files
-were removed without disabling it, restore the CSS from this checkout with:
+Disable **Smooth Shell Corners** in Extensions and restart affected GTK4 apps
+before removing it, or run:
 
 ```bash
-gjs -m restore-native-radius.js
+gnome-extensions disable smooth-shell-corners@xks
+# Restart affected GTK4 apps, then:
+gnome-extensions uninstall smooth-shell-corners@xks
 ```
 
-Then restart apps. This cleanup does not change the switch preference; turn it
-off as well if you do not want the override reapplied next time the extension loads.
+If Shell crashed before cleanup, see [CSS recovery](docs/guide.md#native-gtk4-corner-removal).
 
-#### Reusing settings from the original extension
+## Build from source
 
-The new extension starts with separate preferences. To copy your existing tuning
-once, while Smooth Shell Corners is disabled:
+Requires Git, Node.js 24 with npm, and `glib-compile-schemas`. On Bazzite the
+GLib tool is already available; keep Node.js in your user environment.
 
 ```bash
-dconf dump /org/gnome/shell/extensions/rounded-windows/ > /tmp/ssc-old-settings.ini
-dconf load /org/gnome/shell/extensions/smooth-shell-corners/ < /tmp/ssc-old-settings.ini
+git clone https://github.com/sssxks/smooth-shell-corners.git
+cd smooth-shell-corners
+npm ci
+./install.sh
 ```
 
-**Finding a window identifier:**
-Use the X11/XWayland `WM_CLASS` when available. For Wayland-native apps, use the app ID or desktop file ID shown by GNOME Shell / your launcher entry.
+Log out and back in, enable the extension, then restart GTK4 apps as above.
+For development use `just check`; `just pack` builds the installable ZIP.
+[Architecture and rendering tests](docs/guide.md#development-checks).
 
----
+## Help shape the first release
 
-## Troubleshooting
+Looking for **five people to try it for a week**. Tell us your GNOME version,
+GPU, scaling and apps, then whether you kept it enabled and why.
+[Quick test and feedback instructions](docs/testing.md).
 
-### No rounded corners appear
+## Credits and license
 
-1. Make sure the extension is **enabled** (`gnome-extensions list --enabled | grep smooth-shell-corners`).
-2. Check the journal for errors:
-   ```bash
-   journalctl -b /usr/bin/gnome-shell | grep -E "SmoothShellCorners|JS ERROR"
-   ```
-3. The app may be libadwaita — disable **Leave libadwaita windows unchanged** in settings.
-
-### Corners still square on one specific app
-
-Some apps use a custom identifier. Add its `WM_CLASS`, Wayland app ID, or desktop file ID to the exception list (in whitelist mode) or disable the libadwaita/libhandy skip option.
-
-### Wayland limits
-
-GNOME Shell can round top-level windows managed by Mutter. Popup menus, tooltips, override-redirect X11 surfaces, and some client subsurfaces are compositor-limited and may remain square even on GNOME 50 Wayland.
-
-### Settings window crashes
-
-Make sure you are running GNOME 45 or later. If you see `TypeError: Gdk.RGBA is not a constructor`, reinstall the latest version.
-
-### Extension causes GNOME Shell to crash
-
-```bash
-journalctl -b /usr/bin/gnome-shell | tail -100
-```
-
-Then [open a bug report](#reporting-bugs) with the full log.
-
----
-
-## Reporting bugs
-
-**Before opening an issue**, please:
-
-1. Check the [existing issues](https://github.com/Nathanaelrc/rounded-windows/issues) to avoid duplicates.
-2. Make sure you are on a **supported GNOME version** (45–50).
-3. Try disabling other extensions to rule out conflicts.
-
-**When opening an issue, include:**
-
-```
-**GNOME Shell version:**  (run: gnome-shell --version)
-**Distribution & version:**
-**Display server:**  Wayland / X11
-**Monitor scale:**  100% / 125% / 150% / other
-**Extension version:**  (from resources/metadata.json or the Extensions app)
-
-**Steps to reproduce:**
-1.
-2.
-3.
-
-**What you expected:**
-
-**What actually happened:**
-
-**Journal log:**
-(run: journalctl -b /usr/bin/gnome-shell | grep -E "rounded-windows|JS ERROR" | tail -50)
-```
-
-👉 [Open a new issue](https://github.com/Nathanaelrc/rounded-windows/issues/new)
-
----
-
-## How it works
-
-```
-Window Actor (MetaWindowActor)
-  └─ RoundedCornersEffect  ← Clutter.Effect (pixel-aligned offscreen FBO)
-        Fragment shader:
-          • converts tex coord → pixel position
-          • evaluates squircle formula at each corner
-          • multiplies fragment alpha by the squircle opacity
-          • result: corners are transparent, edges are anti-aliased
-
-Shadow Actor (St.Bin, inserted below the window in global.windowGroup)
-  └─ ClipShadowEffect  ← Shell.GLSLEffect
-        Fragment shader:
-          • same squircle formula as above
-          • maps the padded offscreen texture into actor coordinates
-          • clears the interior, retaining shadow beneath antialiased edges
-  └─ Inner St.Bin  → CSS  border-radius + box-shadow
-```
-
-The window effect owns its framebuffer to preserve text sharpness. The stock
-offscreen effect rounds fractional resource scales up: at 150%, window content
-is sampled at 200% and then reduced again. This extension renders at the actual
-painted density and aligns the framebuffer origin to physical pixels, including
-windows positioned between physical pixels. Overview clones use their projected
-paint size. Cached content is redrawn when the app updates or the sampling grid
-changes. No Mutter patch is needed.
-
-The shader uses a **squircle (superellipse)** formula:
-
-$$\text{dist}(p, c) = \left( |p_x - c_x|^e + |p_y - c_y|^e \right)^{1/e}$$
-
-where `e = smoothing × 10 + 2` (2 = circle, 12 = squircle).
-
----
-
-## Development checks
-
-For a repeatable performance comparison, run `just benchmark`. It builds the
-checkout and measures scripted Overview transitions with six fixed windows in
-a private GNOME Shell 50 session, comparing extension off, corners only, and
-custom shadows across three balanced rounds. It saves raw Sysprof captures and
-JSON results for `just benchmark-compare BEFORE/results.json AFTER/results.json`.
-See [the benchmark guide](tests/performance/README.md) for methodology and limits.
-
-```bash
-just check
-gjs -m tests/unit/native-radius.test.js
-gjs -m tests/compositor/native-radius-render.js
-uv run tests/unit/render.py
-timeout 120s uv run tests/compositor/compositor.py
-glib-compile-schemas --strict --dry-run resources/schemas
-```
-
-TypeScript source lives under `src/`, static extension resources under
-`resources/`, and `dist/` is generated as the complete installable extension.
-The root `extension.js` and `prefs.js` required by GNOME are emitted from small
-entry points; window lifecycle, filtering, geometry, shadows, effects, settings,
-and preference pages are maintained in separate modules.
-
-The rendering test compiles the actual shader snippets in a headless EGL context
-and checks a synthetic border, content preservation, opacity, corner clipping,
-and window/shadow composition without an antialiasing seam.
-It uses an isolated uv environment with Python 3.13 and ModernGL. These checks do
-not replace testing in GNOME Shell with real apps, scaling, and tiling animations.
-The native-radius file tests use temporary directories, including simulated
-Flatpak configs; they do not modify your GTK settings. The native rendering test
-briefly opens a libadwaita window in the current graphical session and verifies
-its render nodes before applying CSS, after applying it, and after removing it.
-
-The compositor test targets Bazzite with GNOME Shell 50.4. It starts a separate
-headless Shell, private session bus and GTK text fixture with temporary settings;
-it does not change the running desktop. It compares interior screenshot pixels
-with the effect disabled at 100%, 125%, 150% and 200%, including fractional pixel
-positions, content updates, opacity and an overview-style clone. Results are
-written to `tests/artifacts/sharpness-results.json`. This renderer has not yet been verified
-on older Shell releases or with mixed-monitor setups and other window effects.
-
-The same compositor test checks shadow continuity along all four edges and corners
-at those scales, with filling on/off and varied blur, spread and offsets. A black
-window and shadow over white must darken continuously toward the window; a bright
-pixel between them fails the test. This reproduced the inherited gap with the
-original effects from Rounded Windows commit `9d9eb77013b24e45ae75fc92a85a9b6d82e052f6`.
-The fix accounts for Mutter's padded offscreen texture, matches the window's
-buffer-edge inset, and keeps shadow under the antialiased edge instead of cutting
-both layers away there.
-
-## Credits
-
-This extension was built by studying and adapting code from several open-source projects:
-
-| Project | Author | What we used |
-|:--------|:-------|:-------------|
-| [rounded-window-corners](https://github.com/yilozt/rounded-window-corners) | yilozt | Original squircle GLSL shader, shadow actor architecture, ClipShadowEffect concept, per-window signal management |
-| [Rounded Window Corners Reborn](https://github.com/flexagoon/rounded-window-corners) | flexagoon | Updated GJS bindings for GNOME 45–47, shadow style system, actor binding pattern |
-| [Mutter](https://gitlab.gnome.org/GNOME/mutter) | GNOME | Understanding of MetaWindowActorX11 paint cycle, shadow architecture (focused/unfocused), FBO pipeline |
-| [GNOME Shell](https://gitlab.gnome.org/GNOME/gnome-shell) | GNOME | Shell.GLSLEffect usage patterns, ExtensionPreferences API |
-
-The squircle shader, shadow clipping with squircle masking, GNOME 50 / Mutter 18 compatibility fixes, GSettings schema, preferences UI, and installation script were completely rewritten and heavily modified to bring this project to life and ensure compatibility with modern GNOME environments. While it stands on the shoulders of giants, this specific implementation and its novel improvements are my own work.
-
----
-
-## License
-
-This project is licensed under the [GNU General Public License v3.0](LICENSE).  
-You are free to use, modify, and distribute it under the same license.
+Forked from [Nathanaelrc/rounded-windows](https://github.com/Nathanaelrc/rounded-windows),
+with code and ideas from [yilozt/rounded-window-corners](https://github.com/yilozt/rounded-window-corners)
+and [flexagoon/rounded-window-corners](https://github.com/flexagoon/rounded-window-corners).
+See [AUTHORS](AUTHORS) for attribution included in release packages.
+Licensed under [GPL-3.0-or-later](LICENSE).

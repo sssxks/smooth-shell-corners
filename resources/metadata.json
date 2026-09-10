@@ -1,8 +1,15 @@
 {
     "uuid": "smooth-shell-corners@xks",
     "name": "Smooth Shell Corners",
-    "description": "Squircles For your Applications! Polished, Consistent Look, Fixes native border or toolkit corners",
-    "shell-version": ["45", "46", "47", "48", "49", "50"],
+    "description": "Consistent rounded and squircle window corners, crisp text at fractional scaling, and optional shadows. Preview tested on GNOME 50.4; GNOME 45\u201349 unverified. Native GTK4 corner replacement is enabled by default and requires restarting apps.",
+    "shell-version": [
+        "45",
+        "46",
+        "47",
+        "48",
+        "49",
+        "50"
+    ],
     "version-name": "0.1.1",
     "url": "https://github.com/sssxks/smooth-shell-corners",
     "settings-schema": "org.gnome.shell.extensions.smooth-shell-corners"

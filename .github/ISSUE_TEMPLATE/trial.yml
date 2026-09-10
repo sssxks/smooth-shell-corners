@@ -1,0 +1,27 @@
+name: One-week trial feedback
+description: Tell us whether you kept the extension enabled and why.
+body:
+  - type: dropdown
+    id: retained
+    attributes:
+      label: Are you still using it?
+      options:
+        - Yes, after at least a week
+        - No, I disabled or removed it
+        - Still trying it (less than a week)
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Your setup
+      description: GNOME version, distribution, GPU, scaling, extension version, and main apps.
+    validations:
+      required: true
+  - type: textarea
+    id: experience
+    attributes:
+      label: What worked well, and what made you stop or almost stop?
+      description: Concrete examples help decide what to fix next. Link a bug report if you filed one.
+    validations:
+      required: true

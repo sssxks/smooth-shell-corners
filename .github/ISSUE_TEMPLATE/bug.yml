@@ -1,0 +1,36 @@
+name: Bug report
+description: Report a rendering, installation, or stability problem.
+body:
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Run gnome-shell --version for the Shell version.
+      value: |
+        Extension version:
+        Distribution:
+        GNOME Shell version:
+        GPU and driver:
+        Wayland or X11:
+        Monitor resolution and scaling (each monitor):
+        Affected app and version:
+        Other window effects / extensions:
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: What happened, and how can we reproduce it?
+      description: Include expected behavior and whether disabling this extension fixes it.
+    validations:
+      required: true
+  - type: textarea
+    id: settings
+    attributes:
+      label: Relevant settings
+      description: Include native GTK4 replacement, custom shadows, padding, and whether apps were restarted.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Screenshot or relevant log excerpt
+      description: Review for personal information before sharing. A small excerpt around the error is enough.

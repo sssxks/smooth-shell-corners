@@ -11,43 +11,38 @@ env:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-
+      - run: sudo apt-get update && sudo apt-get install -y libglib2.0-bin zip
       - run: npm ci
-
-      - name: Build extension zip
+      - run: npm run check
+      - name: Check release version
         run: |
-          npm run build
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const metadata = JSON.parse(fs.readFileSync('resources/metadata.json'));
+          const pkg = JSON.parse(fs.readFileSync('package.json'));
+          if (process.env.GITHUB_REF_NAME !== `v${metadata['version-name']}` || pkg.version !== metadata['version-name'])
+            throw new Error('Tag, package version and extension version must match');
+          JS
+      - name: Package extension
+        run: |
           cd dist
           zip -9r ../smooth-shell-corners@xks.shell-extension.zip .
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+          cd ..
+          sha256sum smooth-shell-corners@xks.shell-extension.zip > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
         with:
-          files: smooth-shell-corners@xks.shell-extension.zip
-          body: |
-            ## Instalación
-
-            1. Descarga el archivo `.zip`
-            2. Ve a https://extensions.gnome.org/local/ y usa **Instalar desde archivo**,
-               o ejecuta:
-               ```bash
-               gnome-extensions install rounded-windows@marcosgt.github.io.shell-extension.zip
-               ```
-
-            ## Cambios
-
-            Ver CHANGELOG.md en el repositorio para el resumen de esta versión.
-
-            ---
-            Para publicar en extensions.gnome.org, sube el `.zip` manualmente en:
-            https://extensions.gnome.org/upload/
+          draft: true
+          prerelease: true
+          files: |
+            smooth-shell-corners@xks.shell-extension.zip
+            SHA256SUMS
+          body_path: docs/release-notes.md
